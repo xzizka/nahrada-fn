@@ -15,8 +15,9 @@ __pycache__/
 .ruff_cache/
 .venv/
 
-# Ansible-generated inventory (local machine addresses, not a template)
+# Ansible-generated inventory/host data (real machine addresses, not a template)
 ansible/inventory/hosts.ini
+ansible/host_vars/
 
 # Editors / OS
 .DS_Store

@@ -1,0 +1,23 @@
+[Unit]
+Description=ftpoc queue (Valkey, Redis-protocol-compatible)
+
+[Container]
+# Container/service named "redis" to match FTPOC_REDIS_URL and the Python
+# redis client, which name the wire protocol, not the vendor - see
+# fulltext-poc/docker-compose.yml's own comment on this.
+ContainerName=redis
+Image=docker.io/valkey/valkey:9.1.1
+Network=ftpoc.network
+# No PublishPort - internal network only.
+HealthCmd=valkey-cli ping
+HealthInterval=5s
+HealthTimeout=3s
+HealthRetries=10
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

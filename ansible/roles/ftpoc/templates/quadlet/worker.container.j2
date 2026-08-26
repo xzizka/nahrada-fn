@@ -1,0 +1,24 @@
+[Unit]
+Description=ftpoc worker
+After=rustfs.service postgres.service redis.service opensearch.service tika.service
+Requires=rustfs.service postgres.service redis.service opensearch.service tika.service
+
+[Container]
+ContainerName=worker
+Image=localhost/ftpoc-poc:local
+Network=ftpoc.network
+EnvironmentFile={{ ftpoc_deploy_dir }}/ftpoc-app.env
+Exec=python -m ftpoc.worker
+HealthCmd=/bin/sh -c "find /tmp/ftpoc-heartbeat -newermt '-60 seconds' 2>/dev/null | grep -q ."
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=10
+HealthStartPeriod=15s
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,30 @@
+[Unit]
+Description=ftpoc rustfs (S3-compatible object storage)
+
+[Container]
+ContainerName=rustfs
+Image=docker.io/rustfs/rustfs:1.0.0-rc.3
+Network=ftpoc.network
+Volume=rustfs-data.volume:/data
+PublishPort={{ ftpoc_bind_addr }}:9000:9000
+PublishPort={{ ftpoc_bind_addr }}:9001:9001
+EnvironmentFile={{ ftpoc_deploy_dir }}/ftpoc-secrets.env
+Environment=RUSTFS_ADDRESS=:9000
+Environment=RUSTFS_CONSOLE_ADDRESS=:9001
+Environment=RUSTFS_CONSOLE_ENABLE=true
+Environment=RUSTFS_OBS_LOGGER_LEVEL=info
+HealthCmd=curl --fail http://localhost:9000/health
+HealthInterval=5s
+HealthTimeout=5s
+HealthRetries=20
+HealthStartPeriod=10s
+Notify=healthy
+
+[Service]
+Restart=always
+# First-time image pulls can take a while; systemd's 90s default start
+# timeout is too tight for that plus HealthStartPeriod plus first health pass.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

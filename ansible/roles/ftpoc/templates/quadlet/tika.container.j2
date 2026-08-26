@@ -1,0 +1,24 @@
+[Unit]
+Description=ftpoc tika (text extraction)
+
+[Container]
+ContainerName=tika
+Image=docker.io/apache/tika:3.3.1.0-full
+Network=ftpoc.network
+Volume={{ ftpoc_deploy_dir }}/tika/tika-config.xml:/tika-config.xml:ro
+Exec=-c /tika-config.xml
+# No PublishPort - Tika parses untrusted binary input by design and has no
+# authentication of its own; stays reachable only from the ftpoc network.
+HealthCmd=wget -q --spider http://localhost:9998/version
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=20
+HealthStartPeriod=20s
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

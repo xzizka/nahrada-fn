@@ -12,7 +12,11 @@
     msg: >-
       BIND_ADDR {{ ftpoc_bind_addr }} is not present on any interface of this
       host. If this is a Tailscale address, make sure tailscaled is up and
-      connected before running this playbook.
+      connected before running this playbook - and check whether it's running
+      with --tun=userspace-networking (`systemctl status tailscaled`), in
+      which case there is no real interface for this address at all and
+      BIND_ADDR should stay at 127.0.0.1 instead (tailscaled proxies inbound
+      tailnet connections straight to 127.0.0.1:<same port> in that mode).
   when:
     - ftpoc_bind_addr not in ["127.0.0.1", "0.0.0.0"]
     - ftpoc_bind_addr not in ftpoc_ip_addrs.stdout
@@ -36,46 +40,100 @@
       - "--exclude=.ruff_cache"
       - "--exclude=*.egg-info"
 
-- name: Render .env for podman-compose
+- name: Render the infra secrets env file (rustfs/opensearch/postgres)
   ansible.builtin.template:
-    src: env.j2
-    dest: "{{ ftpoc_deploy_dir }}/.env"
+    src: ftpoc-secrets.env.j2
+    dest: "{{ ftpoc_deploy_dir }}/ftpoc-secrets.env"
     mode: "0600"
 
-# docker-compose.yml's own depends_on/service_healthy conditions make this
-# block until rustfs/postgres/redis/opensearch/tika are healthy, same as
-# running `make up` on the box directly. Requires podman-compose >=1.0 to
-# actually honor service_healthy - see fulltext-poc/README.md Prerequisites.
-- name: Bring the stack up (build images, start containers)
-  ansible.builtin.command: podman-compose up -d --build
+- name: Render the app env file (ingest-api/worker/scanner/search-api)
+  ansible.builtin.template:
+    src: ftpoc-app.env.j2
+    dest: "{{ ftpoc_deploy_dir }}/ftpoc-app.env"
+    mode: "0600"
+
+# podman-compose's own build step fails on this host: buildah's RUN-step
+# networking (pasta) needs /dev/net/tun, which this LXC container doesn't
+# have. --network=host sidesteps it entirely (no bridge/tap needed, since it
+# just reuses the host's already-connected network namespace for the build).
+# The actual application containers don't need this - Podman's normal
+# rootful (netavark/bridge) run-time networking doesn't touch /dev/net/tun.
+- name: Build the ftpoc application image
+  ansible.builtin.command: >-
+    podman build --network=host -t ftpoc-poc:local -f services/Dockerfile .
   args:
     chdir: "{{ ftpoc_deploy_dir }}"
   changed_when: true
+
+- name: Create the quadlet directory
+  ansible.builtin.file:
+    path: /etc/containers/systemd/ftpoc
+    state: directory
+    mode: "0755"
+
+- name: Render quadlet unit files (network, volumes, containers)
+  ansible.builtin.template:
+    src: "quadlet/{{ item }}.j2"
+    dest: "/etc/containers/systemd/ftpoc/{{ item }}"
+    mode: "0600"
+  loop:
+    - ftpoc.network
+    - rustfs-data.volume
+    - opensearch-data.volume
+    - postgres-data.volume
+    - rustfs.container
+    - opensearch.container
+    - tika.container
+    - redis.container
+    - postgres.container
+    - ingest-api.container
+    - worker.container
+    - scanner.container
+    - search-api.container
+  register: ftpoc_quadlet_files
+
+- name: Reload systemd so quadlet regenerates units from the files above
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: ftpoc_quadlet_files.changed
+
+# One transaction, not a task per service: systemd resolves the full
+# Requires=/After= graph regardless of the order listed here, and each
+# unit's Notify=healthy makes systemd block on that service's first
+# healthcheck pass before starting whatever depends on it - the same
+# ordering guarantee docker-compose.yml's depends_on/service_healthy gave.
+- name: Enable and start the ftpoc stack
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - rustfs.service
+    - opensearch.service
+    - tika.service
+    - redis.service
+    - postgres.service
+    - ingest-api.service
+    - worker.service
+    - scanner.service
+    - search-api.service
 
 - name: Bootstrap the S3 bucket and OpenSearch index template
   ansible.builtin.command: >-
-    podman-compose run --rm --no-deps ingest-api
-    python -m ftpoc.cli bootstrap
-  args:
-    chdir: "{{ ftpoc_deploy_dir }}"
+    podman run --rm --network ftpoc
+    --env-file {{ ftpoc_deploy_dir }}/ftpoc-app.env
+    localhost/ftpoc-poc:local python -m ftpoc.cli bootstrap
   changed_when: true
 
-# Off by default (see ftpoc_run_smoke_tests in group_vars/all/vars.yml).
-# `make hello` uploads a generated test PDF into the real bucket/index, so
-# it's opt-in, not part of every deploy. Gated with `when`, not `--tags`:
-# passing --tags at all makes Ansible skip every untagged task in the whole
-# play, so `--tags smoke` alone would skip the podman install, file sync,
-# `up` and `bootstrap` too - not what "also run the smoke test" should mean.
-- name: "Smoke test: S3 API compatibility probe (make probe)"
-  ansible.builtin.command: make probe
-  args:
-    chdir: "{{ ftpoc_deploy_dir }}"
-  changed_when: false
-  when: ftpoc_run_smoke_tests | bool
-
-- name: "Smoke test: end-to-end hello-world (make hello)"
-  ansible.builtin.command: make hello
-  args:
-    chdir: "{{ ftpoc_deploy_dir }}"
-  changed_when: false
+# Not wired up yet: make probe/make hello drive podman-compose against
+# docker-compose.yml, which would try to (re)create its own network/containers
+# on the same ports the quadlet-managed stack above already owns. Running
+# them here would conflict rather than test anything.
+- name: Fail clearly if smoke tests were requested (unsupported on the quadlet path)
+  ansible.builtin.fail:
+    msg: >-
+      ftpoc_run_smoke_tests is not supported by the quadlet deployment path -
+      make probe/make hello drive podman-compose, which would conflict with
+      the systemd-managed stack this role just started (same ports/network).
+      Verify manually instead, e.g. `curl http://127.0.0.1:8080/healthz`.
   when: ftpoc_run_smoke_tests | bool

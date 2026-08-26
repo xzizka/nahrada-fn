@@ -1,0 +1,23 @@
+[Unit]
+Description=ftpoc postgres (authoritative metadata)
+
+[Container]
+ContainerName=postgres
+Image=docker.io/postgres:18.6-bookworm
+Network=ftpoc.network
+Volume=postgres-data.volume:/var/lib/postgresql
+Volume={{ ftpoc_deploy_dir }}/postgres/001-schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+PublishPort={{ ftpoc_bind_addr }}:5432:5432
+EnvironmentFile={{ ftpoc_deploy_dir }}/ftpoc-secrets.env
+HealthCmd=pg_isready -U {{ ftpoc_postgres_user }} -d {{ ftpoc_postgres_db }}
+HealthInterval=5s
+HealthTimeout=5s
+HealthRetries=20
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

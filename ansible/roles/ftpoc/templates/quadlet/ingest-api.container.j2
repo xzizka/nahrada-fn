@@ -1,0 +1,25 @@
+[Unit]
+Description=ftpoc ingest-api
+After=rustfs.service postgres.service redis.service
+Requires=rustfs.service postgres.service redis.service
+
+[Container]
+ContainerName=ingest-api
+Image=localhost/ftpoc-poc:local
+Network=ftpoc.network
+EnvironmentFile={{ ftpoc_deploy_dir }}/ftpoc-app.env
+Exec=uvicorn ftpoc.ingest_api:app --host 0.0.0.0 --port 8081
+PublishPort={{ ftpoc_bind_addr }}:8081:8081
+HealthCmd=python3 -c "import urllib.request as u; u.urlopen('http://localhost:8081/healthz', timeout=3)"
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=15
+HealthStartPeriod=10s
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

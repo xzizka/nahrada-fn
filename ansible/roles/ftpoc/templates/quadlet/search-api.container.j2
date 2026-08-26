@@ -1,0 +1,25 @@
+[Unit]
+Description=ftpoc search-api
+After=rustfs.service opensearch.service
+Requires=rustfs.service opensearch.service
+
+[Container]
+ContainerName=search-api
+Image=localhost/ftpoc-poc:local
+Network=ftpoc.network
+EnvironmentFile={{ ftpoc_deploy_dir }}/ftpoc-app.env
+Exec=uvicorn ftpoc.search_api:app --host 0.0.0.0 --port 8080
+PublishPort={{ ftpoc_bind_addr }}:8080:8080
+HealthCmd=python3 -c "import urllib.request as u; u.urlopen('http://localhost:8080/healthz', timeout=3)"
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=15
+HealthStartPeriod=10s
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
