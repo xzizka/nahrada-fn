@@ -1,0 +1,3 @@
+collections:
+- name: ansible-posix-1.5.0.tar.gz
+  version: 1.5.0
