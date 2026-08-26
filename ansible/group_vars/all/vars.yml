@@ -13,6 +13,10 @@ ftpoc_bind_addr: "127.0.0.1"
 ftpoc_public_host: "localhost"
 ftpoc_scanner_interval_seconds: 60
 
+# Set to true (e.g. -e ftpoc_run_smoke_tests=true) to also run `make probe`
+# and `make hello` against the real deployed stack after bootstrap.
+ftpoc_run_smoke_tests: false
+
 # --- secrets (defined in group_vars/all/vault.yml) ---
 ftpoc_rustfs_access_key: "{{ vault_rustfs_access_key }}"
 ftpoc_rustfs_secret_key: "{{ vault_rustfs_secret_key }}"

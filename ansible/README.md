@@ -28,6 +28,14 @@ ansible-galaxy collection install -r requirements.yml
    cp inventory/hosts.example.ini inventory/hosts.ini
    $EDITOR inventory/hosts.ini
    ```
+   If you're running this playbook directly on the machine it should deploy
+   to (no separate control node), point it at itself instead of over SSH:
+   ```ini
+   [ftpoc]
+   localhost ansible_connection=local
+   ```
+   `become: true` still applies for a local connection - if the user running
+   `ansible-playbook` needs a sudo password, add `--ask-become-pass`.
 
 2. Secrets - copy the example vault file, fill in real values, then encrypt it
    (it is gitignored either way, but encrypting means it's also safe to commit
@@ -59,7 +67,7 @@ which uploads a generated test PDF into the real bucket/index - opt-in, not
 run by default):
 
 ```
-ansible-playbook playbook.yml --ask-vault-pass --tags smoke
+ansible-playbook playbook.yml --ask-vault-pass -e ftpoc_run_smoke_tests=true
 ```
 
 ## Notes

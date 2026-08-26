@@ -60,19 +60,22 @@
     chdir: "{{ ftpoc_deploy_dir }}"
   changed_when: true
 
-# Off by default - only runs with `--tags smoke`. `make hello` uploads a
-# generated test PDF into the real bucket/index, so it's opt-in, not part of
-# every deploy.
+# Off by default (see ftpoc_run_smoke_tests in group_vars/all/vars.yml).
+# `make hello` uploads a generated test PDF into the real bucket/index, so
+# it's opt-in, not part of every deploy. Gated with `when`, not `--tags`:
+# passing --tags at all makes Ansible skip every untagged task in the whole
+# play, so `--tags smoke` alone would skip the podman install, file sync,
+# `up` and `bootstrap` too - not what "also run the smoke test" should mean.
 - name: "Smoke test: S3 API compatibility probe (make probe)"
   ansible.builtin.command: make probe
   args:
     chdir: "{{ ftpoc_deploy_dir }}"
   changed_when: false
-  tags: [smoke, never]
+  when: ftpoc_run_smoke_tests | bool
 
 - name: "Smoke test: end-to-end hello-world (make hello)"
   ansible.builtin.command: make hello
   args:
     chdir: "{{ ftpoc_deploy_dir }}"
   changed_when: false
-  tags: [smoke, never]
+  when: ftpoc_run_smoke_tests | bool
