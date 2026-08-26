@@ -1,0 +1,77 @@
+---
+# fulltext-poc/README.md: BIND_ADDR must already exist on an interface (e.g.
+# a Tailscale IP requires tailscaled to be up first) or docker can't bind to it.
+- name: Look up this host's interface addresses
+  ansible.builtin.command: ip -o addr show
+  register: ftpoc_ip_addrs
+  changed_when: false
+  when: ftpoc_bind_addr not in ["127.0.0.1", "0.0.0.0"]
+
+- name: Fail fast if BIND_ADDR isn't bound to any interface yet
+  ansible.builtin.fail:
+    msg: >-
+      BIND_ADDR {{ ftpoc_bind_addr }} is not present on any interface of this
+      host. If this is a Tailscale address, make sure tailscaled is up and
+      connected before running this playbook.
+  when:
+    - ftpoc_bind_addr not in ["127.0.0.1", "0.0.0.0"]
+    - ftpoc_bind_addr not in ftpoc_ip_addrs.stdout
+
+- name: Create the deploy directory
+  ansible.builtin.file:
+    path: "{{ ftpoc_deploy_dir }}"
+    state: directory
+    mode: "0750"
+
+- name: Sync fulltext-poc project files to the target host
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../fulltext-poc/"
+    dest: "{{ ftpoc_deploy_dir }}/"
+    delete: true
+    rsync_opts:
+      - "--exclude=.env"
+      - "--exclude=.git"
+      - "--exclude=__pycache__"
+      - "--exclude=.mypy_cache"
+      - "--exclude=.ruff_cache"
+      - "--exclude=*.egg-info"
+
+- name: Render .env for docker compose
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ ftpoc_deploy_dir }}/.env"
+    mode: "0600"
+
+# docker-compose.yml's own depends_on/service_healthy conditions make this
+# block until rustfs/postgres/redis/opensearch/tika are healthy, same as
+# running `make up` on the box directly.
+- name: Bring the stack up (build images, start containers)
+  ansible.builtin.command: docker compose up -d --build
+  args:
+    chdir: "{{ ftpoc_deploy_dir }}"
+  changed_when: true
+
+- name: Bootstrap the S3 bucket and OpenSearch index template
+  ansible.builtin.command: >-
+    docker compose run --rm --no-deps ingest-api
+    python -m ftpoc.cli bootstrap
+  args:
+    chdir: "{{ ftpoc_deploy_dir }}"
+  changed_when: true
+
+# Off by default - only runs with `--tags smoke`. `make hello` uploads a
+# generated test PDF into the real bucket/index, so it's opt-in, not part of
+# every deploy.
+- name: "Smoke test: S3 API compatibility probe (make probe)"
+  ansible.builtin.command: make probe
+  args:
+    chdir: "{{ ftpoc_deploy_dir }}"
+  changed_when: false
+  tags: [smoke, never]
+
+- name: "Smoke test: end-to-end hello-world (make hello)"
+  ansible.builtin.command: make hello
+  args:
+    chdir: "{{ ftpoc_deploy_dir }}"
+  changed_when: false
+  tags: [smoke, never]

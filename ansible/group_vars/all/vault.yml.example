@@ -1,0 +1,16 @@
+---
+# Copy this file to vault.yml, fill in real values, then encrypt it:
+#   cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+#   ansible-vault encrypt group_vars/all/vault.yml
+# group_vars/all/vault.yml is gitignored - it must never be committed in plaintext.
+
+vault_rustfs_access_key: "CHANGE-ME-access-key"
+vault_rustfs_secret_key: "CHANGE-ME-secret-key-min-8-chars"
+
+# Must satisfy OpenSearch's complexity check: >=8 chars, upper+lower+digit+special,
+# or the opensearch container exits on startup with no obvious log message.
+vault_opensearch_admin_password: "CHANGE-Me-123!"
+
+vault_postgres_user: "ftpoc"
+vault_postgres_password: "CHANGE-ME-postgres-password"
+vault_postgres_db: "ftpoc"

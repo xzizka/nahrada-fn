@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  tika-server config for the fulltext-poc pipeline.
+
+  Fork mode is Tika Server's default since 2.x (noFork=false) and is left
+  untouched here on purpose: a corrupt/hostile document crashes only the
+  forked child, not the whole server. Do not set noFork=true.
+  Verified against tika-server's help output in apache/tika:3.3.1.0-full,
+  which shows forking as default and noFork as the opt-out flag.
+-->
+<properties>
+  <server>
+    <params>
+      <host>0.0.0.0</host>
+      <port>9998</port>
+
+      <!-- Explicit even though it matches the built-in default: this is the
+           setting that keeps a broken PDF from taking down the whole pod. -->
+      <noFork>false</noFork>
+
+      <!-- Bumped from the 300000ms (5 min) default: scanned multi-hundred-page
+           PDFs run through OCR-less text extraction can legitimately take
+           longer than that under load. -->
+      <taskTimeoutMillis>600000</taskTimeoutMillis>
+      <taskPulseMillis>10000</taskPulseMillis>
+      <maxForkedStartupMillis>120000</maxForkedStartupMillis>
+      <maxRestarts>-1</maxRestarts>
+      <maxFiles>100000</maxFiles>
+
+      <!-- No request-size cap here: `javap` against the actual 3.3.1 jar
+           (org.apache.tika.server.core.TikaServerConfig) confirms this
+           version exposes no maxRequestSizeBytes setter - that property
+           only exists in newer/main-branch Tika. See VERSIONS.md for the
+           request-size mitigation used instead (Tika has no published
+           port and is only ever called by `worker` with objects already
+           bounded by what ingest-api/scanner accepted). -->
+    </params>
+  </server>
+</properties>

@@ -1,0 +1,8 @@
+---
+- name: Deploy the fulltext-poc docker-compose stack
+  hosts: ftpoc
+  become: true
+
+  roles:
+    - role: docker
+    - role: ftpoc

@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fulltext-poc &mdash; vyhledávání</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f5;
+    --fg: #1b1b18;
+    --muted: #6b6b64;
+    --border: #ddd9d0;
+    --accent: #8a4b2a;
+    --card: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1b18;
+      --fg: #ede9e0;
+      --muted: #a3a096;
+      --border: #3a3833;
+      --accent: #d98a5f;
+      --card: #24231f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 3rem 1.25rem 4rem;
+  }
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin: 0 0 0.25rem;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin: 0 0 2rem;
+  }
+  form {
+    display: flex;
+    gap: 0.5rem;
+  }
+  input[type="search"] {
+    flex: 1;
+    padding: 0.65rem 0.85rem;
+    font-size: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--fg);
+  }
+  input[type="search"]:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  button {
+    padding: 0.65rem 1.1rem;
+    font-size: 1rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: default; }
+  .status {
+    margin-top: 1rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+    min-height: 1.2em;
+  }
+  ul.results {
+    list-style: none;
+    margin: 1.5rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  li.hit {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+  }
+  .hit-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 0.4rem;
+  }
+  .filename {
+    font-weight: 600;
+    word-break: break-word;
+  }
+  .score {
+    color: var(--muted);
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .snippet {
+    color: var(--fg);
+    font-size: 0.92rem;
+    line-height: 1.5;
+    white-space: pre-line;
+  }
+  .snippet em {
+    background: color-mix(in srgb, var(--accent) 25%, transparent);
+    font-style: normal;
+    font-weight: 600;
+    border-radius: 3px;
+    padding: 0 0.15em;
+  }
+  .download {
+    display: inline-block;
+    margin-top: 0.6rem;
+    font-size: 0.85rem;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .download:hover { text-decoration: underline; }
+  footer {
+    margin-top: 3rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Fulltextové vyhledávání dokumentů</h1>
+  <p class="subtitle">Prohledává extrahovaný obsah dokumentů (hunspell lemmatizace pro češtinu).</p>
+
+  <form id="search-form">
+    <input type="search" id="query" name="q" placeholder="např. smlouvám, záruka, &quot;písemnou formu&quot;" autofocus autocomplete="off">
+    <button type="submit" id="submit-btn">Hledat</button>
+  </form>
+
+  <p class="status" id="status" role="status"></p>
+  <ul class="results" id="results"></ul>
+
+  <footer>fulltext-poc &middot; volá <code>GET /search</code> na tomto search-api &middot;
+    <a id="upload-link" href="#">nahrát dokument</a>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  const form = document.getElementById("search-form");
+  const input = document.getElementById("query");
+  const button = document.getElementById("submit-btn");
+  const statusEl = document.getElementById("status");
+  const resultsEl = document.getElementById("results");
+
+  // ingest-api runs as a separate service on port 8081; build the link from
+  // whatever host the user actually used to reach THIS page (localhost, a
+  // Tailscale IP, a MagicDNS name, ...) rather than hardcoding "localhost".
+  document.getElementById("upload-link").href =
+    `${window.location.protocol}//${window.location.hostname}:8081/`;
+
+  function escapeHtml(text) {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  // Highlights come from OpenSearch as plain text with literal <em>/</em>
+  // markers wrapped around matched terms. That text originates from
+  // Tika-extracted, untrusted document content, so it must be escaped
+  // before insertion - only afterwards do we re-enable the specific <em>
+  // markers we ourselves asked OpenSearch to insert. Never render
+  // document-derived strings as raw HTML directly.
+  function highlightToSafeHtml(text) {
+    const escaped = escapeHtml(text);
+    return escaped
+      .replace(/&lt;em&gt;/g, "<em>")
+      .replace(/&lt;\/em&gt;/g, "</em>");
+  }
+
+  function renderResults(data) {
+    resultsEl.innerHTML = "";
+
+    if (data.hits.length === 0) {
+      statusEl.textContent = `Žádné výsledky (${data.took_ms} ms).`;
+      return;
+    }
+
+    statusEl.textContent = `${data.total} výsledek/ů, ${data.took_ms} ms.`;
+
+    for (const hit of data.hits) {
+      const li = document.createElement("li");
+      li.className = "hit";
+
+      const header = document.createElement("div");
+      header.className = "hit-header";
+
+      const filename = document.createElement("span");
+      filename.className = "filename";
+      filename.textContent = hit.filename;
+
+      const score = document.createElement("span");
+      score.className = "score";
+      score.textContent = `skóre ${hit.score.toFixed(2)}`;
+
+      header.appendChild(filename);
+      header.appendChild(score);
+      li.appendChild(header);
+
+      for (const snippet of hit.highlights) {
+        const p = document.createElement("div");
+        p.className = "snippet";
+        p.innerHTML = highlightToSafeHtml(snippet);
+        li.appendChild(p);
+      }
+
+      const link = document.createElement("a");
+      link.className = "download";
+      link.href = hit.download_url;
+      link.textContent = "Stáhnout dokument ↓";
+      li.appendChild(link);
+
+      resultsEl.appendChild(li);
+    }
+  }
+
+  async function runSearch(query) {
+    button.disabled = true;
+    statusEl.textContent = "Vyhledávám…";
+    resultsEl.innerHTML = "";
+
+    try {
+      const url = new URL("/search", window.location.origin);
+      url.searchParams.set("q", query);
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const body = await response.text();
+        statusEl.textContent = `Chyba ${response.status}: ${body.slice(0, 200)}`;
+        return;
+      }
+
+      const data = await response.json();
+      renderResults(data);
+    } catch (err) {
+      statusEl.textContent = `Dotaz selhal: ${err.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    const query = input.value.trim();
+    if (query) {
+      runSearch(query);
+    }
+  });
+})();
+</script>
+</body>
+</html>

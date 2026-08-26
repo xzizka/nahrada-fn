@@ -1,0 +1,23 @@
+# Secrets - never commit real credentials
+# (.env.example is excluded too: it was created via `cp .env.example .env`
+# and never edited, so its contents can't be assumed to be safe placeholders.)
+fulltext-poc/.env
+fulltext-poc/.env.example
+ansible/group_vars/all/vault.yml
+*.retry
+.vault_pass*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# Ansible-generated inventory (local machine addresses, not a template)
+ansible/inventory/hosts.ini
+
+# Editors / OS
+.DS_Store
+*.swp

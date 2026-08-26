@@ -1,0 +1,230 @@
+x-ftpoc-build: &ftpoc-build
+  context: .
+  dockerfile: services/Dockerfile
+
+x-ftpoc-image: &ftpoc-image ftpoc-poc:local
+
+x-ftpoc-env: &ftpoc-env
+  FTPOC_S3_ENDPOINT: "http://rustfs:9000"
+  FTPOC_S3_PUBLIC_ENDPOINT: "http://${PUBLIC_HOST:-localhost}:9000"
+  FTPOC_S3_ACCESS_KEY: "${RUSTFS_ACCESS_KEY}"
+  FTPOC_S3_SECRET_KEY: "${RUSTFS_SECRET_KEY}"
+  FTPOC_S3_BUCKET: "documents"
+  FTPOC_OPENSEARCH_URL: "http://opensearch:9200"
+  FTPOC_OPENSEARCH_USER: "admin"
+  FTPOC_OPENSEARCH_PASSWORD: "${OPENSEARCH_INITIAL_ADMIN_PASSWORD}"
+  FTPOC_POSTGRES_DSN: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+  FTPOC_REDIS_URL: "redis://redis:6379/0"
+  FTPOC_TIKA_URL: "http://tika:9998"
+  FTPOC_SCANNER_INTERVAL_SECONDS: "${SCANNER_INTERVAL_SECONDS:-60}"
+
+services:
+  rustfs:
+    image: rustfs/rustfs:1.0.0-rc.3
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: "${RUSTFS_ACCESS_KEY}"
+      RUSTFS_SECRET_KEY: "${RUSTFS_SECRET_KEY}"
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_OBS_LOGGER_LEVEL: "info"
+    volumes:
+      - rustfs-data:/data
+    ports:
+      - "${BIND_ADDR}:9000:9000"
+      # Console - convenience for the lab only. Do not publish in production;
+      # see README "Co tahle PoC vědomě neřeší".
+      - "${BIND_ADDR}:9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  opensearch:
+    image: opensearchproject/opensearch:3.8.0
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms2g -Xmx2g"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "${OPENSEARCH_INITIAL_ADMIN_PASSWORD}"
+      # Security plugin stays ON (basic auth intact); only the HTTP-layer TLS
+      # termination is disabled, so we get auth without self-signed certs in
+      # a lab. See README for the production tradeoff.
+      plugins.security.ssl.http.enabled: "false"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+      - ./opensearch/hunspell:/usr/share/opensearch/config/hunspell:ro
+    ports:
+      - "${BIND_ADDR}:9200:9200"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s -u admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD} http://localhost:9200/_cluster/health | grep -Eq '\"status\":\"(green|yellow)\"'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:3.8.0
+    restart: unless-stopped
+    profiles: ["dashboards"]
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+    ports:
+      - "${BIND_ADDR}:5601:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+  tika:
+    image: apache/tika:3.3.1.0-full
+    restart: unless-stopped
+    command: ["-c", "/tika-config.xml"]
+    volumes:
+      - ./tika/tika-config.xml:/tika-config.xml:ro
+    # No published port: Tika parses untrusted binary input by design and has
+    # no authentication of its own - it stays reachable only from the
+    # internal compose network.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9998/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  redis:
+    # Valkey: Redis-protocol-compatible, BSD-3 fork. Service is still named
+    # "redis" (matches FTPOC_REDIS_URL / make_redis_client, which name the
+    # wire protocol our client library speaks, not a vendor) - same pattern
+    # as calling the storage tier "S3" regardless of which backend runs it.
+    image: valkey/valkey:9.1.1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:18.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_DB}"
+    volumes:
+      # postgres:18+'s official image mounts the PARENT dir, not .../data
+      # directly - it manages its own major-version-specific subdirectory
+      # now (pg_ctlcluster-style), and refuses to start against the old
+      # convention even against an empty volume.
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/001-schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    ports:
+      - "${BIND_ADDR}:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ingest-api:
+    build: *ftpoc-build
+    image: *ftpoc-image
+    restart: unless-stopped
+    command: ["uvicorn", "ftpoc.ingest_api:app", "--host", "0.0.0.0", "--port", "8081"]
+    environment: *ftpoc-env
+    ports:
+      - "${BIND_ADDR}:8081:8081"
+    depends_on:
+      rustfs:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8081/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  worker:
+    build: *ftpoc-build
+    image: *ftpoc-image
+    restart: unless-stopped
+    command: ["python", "-m", "ftpoc.worker"]
+    environment: *ftpoc-env
+    depends_on:
+      rustfs:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      tika:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "find /tmp/ftpoc-heartbeat -newermt '-60 seconds' 2>/dev/null | grep -q ."]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  scanner:
+    build: *ftpoc-build
+    image: *ftpoc-image
+    restart: unless-stopped
+    command: ["python", "-m", "ftpoc.scanner"]
+    environment: *ftpoc-env
+    depends_on:
+      rustfs:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "find /tmp/ftpoc-heartbeat -newermt '-60 seconds' 2>/dev/null | grep -q ."]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  search-api:
+    build: *ftpoc-build
+    image: *ftpoc-image
+    restart: unless-stopped
+    command: ["uvicorn", "ftpoc.search_api:app", "--host", "0.0.0.0", "--port", "8080"]
+    environment: *ftpoc-env
+    ports:
+      - "${BIND_ADDR}:8080:8080"
+    depends_on:
+      rustfs:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+volumes:
+  rustfs-data:
+  opensearch-data:
+  postgres-data:
