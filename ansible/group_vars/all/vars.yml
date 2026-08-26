@@ -13,11 +13,6 @@ ftpoc_bind_addr: "127.0.0.1"
 ftpoc_public_host: "localhost"
 ftpoc_scanner_interval_seconds: 60
 
-# Linux user(s) to add to the "docker" group on the target host.
-# Defaults to the user Ansible connects as.
-docker_users:
-  - "{{ ansible_user }}"
-
 # --- secrets (defined in group_vars/all/vault.yml) ---
 ftpoc_rustfs_access_key: "{{ vault_rustfs_access_key }}"
 ftpoc_rustfs_secret_key: "{{ vault_rustfs_secret_key }}"

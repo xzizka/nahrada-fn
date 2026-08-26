@@ -1,6 +1,6 @@
 ---
 # fulltext-poc/README.md: BIND_ADDR must already exist on an interface (e.g.
-# a Tailscale IP requires tailscaled to be up first) or docker can't bind to it.
+# a Tailscale IP requires tailscaled to be up first) or Podman can't bind to it.
 - name: Look up this host's interface addresses
   ansible.builtin.command: ip -o addr show
   register: ftpoc_ip_addrs
@@ -36,7 +36,7 @@
       - "--exclude=.ruff_cache"
       - "--exclude=*.egg-info"
 
-- name: Render .env for docker compose
+- name: Render .env for podman-compose
   ansible.builtin.template:
     src: env.j2
     dest: "{{ ftpoc_deploy_dir }}/.env"
@@ -44,16 +44,17 @@
 
 # docker-compose.yml's own depends_on/service_healthy conditions make this
 # block until rustfs/postgres/redis/opensearch/tika are healthy, same as
-# running `make up` on the box directly.
+# running `make up` on the box directly. Requires podman-compose >=1.0 to
+# actually honor service_healthy - see fulltext-poc/README.md Prerequisites.
 - name: Bring the stack up (build images, start containers)
-  ansible.builtin.command: docker compose up -d --build
+  ansible.builtin.command: podman-compose up -d --build
   args:
     chdir: "{{ ftpoc_deploy_dir }}"
   changed_when: true
 
 - name: Bootstrap the S3 bucket and OpenSearch index template
   ansible.builtin.command: >-
-    docker compose run --rm --no-deps ingest-api
+    podman-compose run --rm --no-deps ingest-api
     python -m ftpoc.cli bootstrap
   args:
     chdir: "{{ ftpoc_deploy_dir }}"

@@ -2,8 +2,12 @@
 
 Deploys the `fulltext-poc` docker-compose stack (see
 [`../fulltext-poc/README.md`](../fulltext-poc/README.md)) to a remote Linux
-host: installs Docker Engine + the Compose plugin, sets the `vm.max_map_count`
+host: installs Podman + podman-compose, sets the `vm.max_map_count`
 OpenSearch requires, copies the project there, and brings the stack up.
+
+Podman is daemonless and runs rootful here (via Ansible's `become: true`),
+the same trust model as the rootful Docker daemon it replaces - no service to
+enable, no docker-group-equivalent to manage.
 
 ## Prerequisites
 
@@ -47,7 +51,7 @@ ansible-playbook playbook.yml --ask-vault-pass
 ```
 
 This brings the stack up and runs `bootstrap` (S3 bucket + OpenSearch index
-template). It's safe to re-run - `docker compose up -d --build` and the
+template). It's safe to re-run - `podman-compose up -d --build` and the
 bootstrap step are both idempotent.
 
 To also run the smoke tests (`make probe` and `make hello` on the target,

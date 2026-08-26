@@ -3,12 +3,18 @@
 Fulltext search pipeline for document content (FileNet replacement scope: a
 content fulltext index, not a full ECM). RustFS (S3) for binaries, PostgreSQL
 for authoritative metadata, Tika for extraction, OpenSearch for the index.
-The index is derived and disposable - see `docker compose stop tika && make
+The index is derived and disposable - see `podman-compose stop tika && make
 reindex` in Phase 3 below.
 
 ## Prerequisites on the host
 
-- Docker + Docker Compose v2 (`docker compose version`).
+- Podman + podman-compose (`podman-compose version`). podman-compose >=1.0
+  (the version shipped by current Debian/Ubuntu/Fedora) is required for two
+  things this stack relies on: honoring `depends_on: condition:
+  service_healthy` (the whole startup order depends on it) and the `run
+  --user ... -v ...` flag overrides used by `make hello`/`make lint`. If
+  `podman-compose --version` reports something older, upgrade it rather than
+  debugging startup-order or `make hello`/`make lint` failures first.
 - **`vm.max_map_count >= 262144`** - OpenSearch will not start otherwise.
   ```
   sudo sysctl -w vm.max_map_count=262144
@@ -34,9 +40,10 @@ Then open `http://localhost:8080/` for the minimal search UI, or query
 ## Accessing this from outside the host
 
 Every published port is bound as `${BIND_ADDR}:PORT:PORT`, not bare
-`PORT:PORT` - binding only `PORT:PORT` makes Docker insert its own iptables
-rules ahead of the host firewall, so a `ufw deny` on that port would not
-actually block it. Binding a specific address avoids that entirely.
+`PORT:PORT` - binding only `PORT:PORT` makes Podman's rootful networking
+(netavark) insert its own iptables/nftables rules ahead of the host firewall,
+so a `ufw deny` on that port would not actually block it. Binding a specific
+address avoids that entirely.
 
 Three options, from safest to broadest:
 
@@ -57,18 +64,18 @@ PUBLIC_HOST=tuxedo.tail777976.ts.net
 ```
 
 `BIND_ADDR` here is the literal Tailscale interface address, not `0.0.0.0` -
-Docker binds its port-forwarding only to that interface, so the services are
+Podman binds its port-forwarding only to that interface, so the services are
 simply not reachable from anywhere except the tailnet. `PUBLIC_HOST` is
 separate: it's what gets baked into presigned S3 download URLs (see the
 `S3_ENDPOINT` vs `S3_PUBLIC_ENDPOINT` split in Phase 4), and the MagicDNS
 name is used there instead of the raw IP so it keeps working if the
 Tailscale IP ever gets reassigned. Requires `tailscaled` to be up before
-`docker compose up` runs, since the interface has to exist for Docker to
-bind to it.
+`make up` runs (`podman-compose up` under the hood), since the interface has
+to exist before Podman can bind to it.
 
 If you change `BIND_ADDR`/`PUBLIC_HOST` after the stack is already up, run
-`docker compose up -d` again to re-create the containers with the new port
-bindings.
+`make up` again (`podman-compose up -d --build`) to re-create the containers
+with the new port bindings.
 
 ## Ports
 

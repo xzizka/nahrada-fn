@@ -1,0 +1,52 @@
+---
+- name: Fail on unsupported OS family
+  ansible.builtin.fail:
+    msg: >-
+      This role only supports the Debian and RedHat OS families
+      (found: {{ ansible_os_family }}).
+  when: ansible_os_family not in ["Debian", "RedHat"]
+
+# fulltext-poc/README.md: "OpenSearch will not start otherwise."
+- name: Set vm.max_map_count for OpenSearch
+  ansible.posix.sysctl:
+    name: vm.max_map_count
+    value: "262144"
+    sysctl_set: true
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-opensearch.conf
+
+- name: Install Podman, podman-compose, and supporting tools (Debian family)
+  ansible.builtin.apt:
+    name:
+      - podman
+      - podman-compose
+      - rsync
+      - make
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+
+# podman-compose isn't in RHEL/Rocky/Alma's base repos; Fedora and current
+# CentOS Stream ship it directly and already have no epel-release package,
+# so this is a no-op for install-state purposes there.
+- name: Enable EPEL (RedHat family, needed for podman-compose on RHEL/Rocky/Alma)
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Install Podman, podman-compose, and supporting tools (RedHat family)
+  ansible.builtin.dnf:
+    name:
+      - podman
+      - podman-compose
+      - rsync
+      - make
+    state: present
+  when: ansible_os_family == "RedHat"
+
+# Podman is daemonless (unlike dockerd) - there is no service to enable or
+# start, and no docker-group-equivalent to add users to: every task below
+# runs podman-compose as root via `become: true`, same trust model as the
+# rootful Docker daemon this replaces.
