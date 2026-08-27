@@ -1,0 +1,42 @@
+[Unit]
+Description=ftpoc opensearch-dashboards
+After=opensearch.service
+Requires=opensearch.service
+
+[Container]
+ContainerName=opensearch-dashboards
+Image=docker.io/opensearchproject/opensearch-dashboards:3.8.0
+Network=ftpoc.network
+PublishPort={{ ftpoc_bind_addr }}:5601:5601
+# Value is a JSON array string ["http://opensearch:9200"] (Dashboards
+# requires this exact form). The embedded literal quotes need the outer
+# quote+backslash-escape here - left bare, systemd's Environment= parser
+# treats the first unescaped `"` as opening a quoted span and mangles the
+# reconstructed value, so Dashboards fails config validation with
+# "could not parse array value from json input" and crash-loops.
+Environment="OPENSEARCH_HOSTS=[\"http://opensearch:9200\"]"
+# docker-compose.yml defines no healthcheck for this service either (nothing
+# else depends on it) - added here anyway so Notify=healthy gives an actual
+# "is it ready" signal instead of systemd considering it started the instant
+# the container process launches, well before Dashboards' plugin startup
+# (which takes well over HealthStartPeriod's default) finishes.
+# Not `curl -sf` (fails on any >=400): with the security plugin enabled on
+# the backing OpenSearch cluster, /api/status itself requires auth and
+# returns 401 even once Dashboards is genuinely up - a real HTTP response of
+# any status is what "ready" looks like here, `000`/connection-refused is
+# the only thing that actually means "not ready yet". Single-quoted (not
+# double-quoted) specifically to avoid embedded-quote escaping - see the
+# OPENSEARCH_HOSTS comment above for what goes wrong with that.
+HealthCmd=/bin/sh -c 'curl -s -o /dev/null -w %{http_code} http://localhost:5601/api/status | grep -qv 000'
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=20
+HealthStartPeriod=60s
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

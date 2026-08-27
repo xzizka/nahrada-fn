@@ -90,6 +90,7 @@
     - worker.container
     - scanner.container
     - search-api.container
+    - opensearch-dashboards.container
   register: ftpoc_quadlet_files
 
 - name: Reload systemd so quadlet regenerates units from the files above
@@ -117,6 +118,16 @@
     - worker.service
     - scanner.service
     - search-api.service
+
+# Mirrors docker-compose.yml's `profiles: ["dashboards"]` - the unit is
+# always rendered above (so it's there to start by hand), but not enabled by
+# default; opt in with ftpoc_enable_dashboards=true.
+- name: Enable and start opensearch-dashboards
+  ansible.builtin.systemd:
+    name: opensearch-dashboards.service
+    state: started
+    enabled: true
+  when: ftpoc_enable_dashboards | bool
 
 - name: Bootstrap the S3 bucket and OpenSearch index template
   ansible.builtin.command: >-
@@ -193,3 +204,12 @@
   ansible.builtin.debug:
     var: ftpoc_hello_result.stdout_lines
   when: ftpoc_run_smoke_tests | bool
+
+# Only meaningful when dashboards is actually enabled - by the time this
+# runs, the "Enable and start opensearch-dashboards" task above already
+# blocked on Notify=healthy, so this is a confirmation, not a wait loop.
+- name: "Smoke test: opensearch-dashboards reachability"
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:5601/api/status"
+    status_code: 200
+  when: (ftpoc_run_smoke_tests | bool) and (ftpoc_enable_dashboards | bool)

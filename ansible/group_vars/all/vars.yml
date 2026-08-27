@@ -13,9 +13,15 @@ ftpoc_bind_addr: "127.0.0.1"
 ftpoc_public_host: "localhost"
 ftpoc_scanner_interval_seconds: 60
 
-# Set to true (e.g. -e ftpoc_run_smoke_tests=true) to also run `make probe`
-# and `make hello` against the real deployed stack after bootstrap.
+# Set to true (e.g. -e ftpoc_run_smoke_tests=true) to also run the S3 probe
+# and end-to-end hello-world smoke tests against the real deployed stack
+# after bootstrap - see ansible/README.md.
 ftpoc_run_smoke_tests: false
+
+# Mirrors docker-compose.yml's `profiles: ["dashboards"]` - off by default,
+# same as compose only starting it when asked. The unit is rendered either
+# way; this only controls whether it's enabled/started.
+ftpoc_enable_dashboards: false
 
 # --- secrets (defined in group_vars/all/vault.yml) ---
 ftpoc_rustfs_access_key: "{{ vault_rustfs_access_key }}"

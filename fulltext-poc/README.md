@@ -91,11 +91,16 @@ with the new port bindings.
 | ingest-api | 8081 | yes (JSON only) |
 | search-api | 8080 | yes - `GET /search` (JSON) and `GET /` (minimal search UI, see below) |
 
-**RustFS console**: port 9001 is published and accepts connections, but a plain
-`GET /` returns an S3-style XML `AccessDenied` error, not an HTML page - it
-does not appear to serve a working browsable console in this build. Not
-investigated further since nothing in this pipeline depends on it; use the
-S3 API on port 9000 (or `make probe`) to interact with the bucket instead.
+**RustFS console**: port 9001 does serve a working browsable console - a
+Next.js app at `/rustfs/console/` - but only found this after an earlier
+version of this note claimed otherwise. RustFS routes by User-Agent: a
+request with no browser-like UA (e.g. plain `curl`, or any S3 SDK) gets
+`403`/S3-style XML `AccessDenied` straight from the S3 API handler, while a
+browser-like UA gets a `302` to `/rustfs/console/` and the real HTML app
+(confirmed with `curl -A "Mozilla/5.0 ..."`). A literal browser hits this
+automatically; anything scripted (`make probe`, health checks, `curl`
+without a UA override) will only ever see the API response and should not be
+read as the console being broken.
 
 **Minimal search UI**: `search-api` serves a small static page at `/` -
 a search box that calls `GET /search` and renders results with highlights

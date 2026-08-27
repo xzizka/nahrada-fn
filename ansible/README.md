@@ -200,9 +200,17 @@ on any container-based (as opposed to full-VM) target:
   `EnvironmentFile=.../ftpoc-app.env`, both root-only-readable (`0600`). The
   opensearch healthcheck references `$OPENSEARCH_INITIAL_ADMIN_PASSWORD` from
   that file rather than embedding the password a second time.
-- `docker-compose.yml`'s `opensearch-dashboards` (behind `--profile
-  dashboards`, dev-only convenience) has no quadlet equivalent here - it's
-  not part of this deployment path.
+- `opensearch-dashboards.container` mirrors `docker-compose.yml`'s
+  `profiles: ["dashboards"]`: the unit is always rendered, but only
+  enabled/started when `ftpoc_enable_dashboards: true` (default `false`,
+  same opt-in-by-default behavior as compose). Publishes port 5601 on
+  `ftpoc_bind_addr` when enabled. Unlike compose (which defines no
+  healthcheck for it), this unit has one anyway (`GET /api/status`,
+  `HealthStartPeriod=60s` - Dashboards' plugin startup genuinely takes that
+  long) so `Notify=healthy` gives a real readiness signal instead of
+  systemd considering it "started" the instant the container process
+  launches. When both `ftpoc_enable_dashboards` and `ftpoc_run_smoke_tests`
+  are true, a smoke test task confirms `/api/status` is actually reachable.
 - `make reset` (deletes all data volumes) has no equivalent wired into this
   playbook by design - it's destructive and interactive. To tear down the
   quadlet deployment by hand on the target: `systemctl disable --now` the
