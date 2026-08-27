@@ -2,3 +2,4 @@
 
 - [`fulltext-poc/`](fulltext-poc/README.md) - the fulltext search pipeline (FileNet replacement PoC): RustFS, PostgreSQL, Tika, OpenSearch behind a docker-compose stack.
 - [`ansible/`](ansible/README.md) - Ansible playbook that deploys the `fulltext-poc` docker-compose stack to a remote host.
+- [`docs/anatomie-fulltext-poc.html`](docs/anatomie-fulltext-poc.html) - component diagram (custom code vs. configuration) and production-readiness recommendations.

@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anatomie fulltext-poc</title>
+<style>
+  :root {
+    --bg: #EEF0F0;
+    --surface: #FFFFFF;
+    --surface-2: #E2E6E8;
+    --ink: #14181C;
+    --ink-muted: #4B5560;
+    --line: #C7CDD1;
+    --accent: #C9642B;
+    --config: #3B7A8C;
+    --tuning: #6B5B95;
+    --deploy: #4C7A5E;
+    --font-display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+    --font-body: "IBM Plex Sans", "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", "Consolas", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161B;
+      --surface: #1A2027;
+      --surface-2: #222A32;
+      --ink: #E7EBEE;
+      --ink-muted: #9AA7B0;
+      --line: #2E3A44;
+      --accent: #E58A52;
+      --config: #5FAFC4;
+      --tuning: #9C8FD1;
+      --deploy: #7FB89A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161B;
+    --surface: #1A2027;
+    --surface-2: #222A32;
+    --ink: #E7EBEE;
+    --ink-muted: #9AA7B0;
+    --line: #2E3A44;
+    --accent: #E58A52;
+    --config: #5FAFC4;
+    --tuning: #9C8FD1;
+    --deploy: #7FB89A;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.55;
+  }
+  ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+
+  .page {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 56px 24px 100px;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    display: block;
+    margin-bottom: 14px;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(2.6rem, 6vw, 4.2rem);
+    line-height: 0.96;
+    letter-spacing: -0.01em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+
+  .lede {
+    max-width: 62ch;
+    font-size: 1.1rem;
+    color: var(--ink-muted);
+    margin: 0 0 40px;
+  }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.9rem;
+    letter-spacing: -0.005em;
+    margin: 72px 0 8px;
+    text-wrap: balance;
+  }
+  h2 .num {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    color: var(--ink-muted);
+    font-weight: 400;
+    margin-right: 10px;
+  }
+  h3 {
+    font-family: var(--font-body);
+    font-weight: 700;
+    font-size: 1.05rem;
+    margin: 28px 0 10px;
+  }
+
+  p { max-width: 66ch; }
+  p.section-intro { color: var(--ink-muted); max-width: 66ch; margin: 0 0 28px; }
+
+  /* legend */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    padding: 16px 20px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    margin: 0 0 32px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    font-size: 0.86rem;
+  }
+  .legend-swatch {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    border-width: 2px;
+    border-style: solid;
+    transform: translateY(2px);
+    flex-shrink: 0;
+  }
+  .legend-item small { color: var(--ink-muted); }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.16em 0.6em;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.01em;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+  }
+  .chip--code   { color: var(--accent);  background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
+  .chip--std    { color: var(--config);  background: color-mix(in srgb, var(--config) 13%, var(--surface)); }
+  .chip--tune   { color: var(--tuning);  background: color-mix(in srgb, var(--tuning) 13%, var(--surface)); }
+  .chip--deploy { color: var(--deploy);  background: color-mix(in srgb, var(--deploy) 13%, var(--surface)); }
+
+  /* figures */
+  figure {
+    margin: 0 0 12px;
+    padding: 0;
+  }
+  .diagram-frame {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px;
+    overflow-x: auto;
+  }
+  .diagram-frame svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-width: 640px;
+    color: var(--ink);
+  }
+  figcaption {
+    font-size: 0.88rem;
+    color: var(--ink-muted);
+    margin-top: 10px;
+    max-width: 66ch;
+  }
+
+  /* table */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin: 0 0 12px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 680px;
+    font-size: 0.92rem;
+    background: var(--surface);
+  }
+  thead th {
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    font-weight: 500;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  tbody td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.name { font-family: var(--font-mono); font-size: 0.88rem; white-space: nowrap; }
+  td.note { color: var(--ink-muted); }
+
+  code, kbd {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: var(--surface-2);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+
+  /* recommendation groups */
+  .rec-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 18px;
+    margin: 28px 0 8px;
+  }
+  .rec-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px 20px;
+  }
+  .rec-card h4 {
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .rec-card ul {
+    margin: 0;
+    padding-left: 1.05em;
+    font-size: 0.9rem;
+    color: var(--ink-muted);
+  }
+  .rec-card li { margin: 5px 0; }
+  .rec-card li strong { color: var(--ink); font-weight: 600; }
+
+  hr.div {
+    border: none;
+    border-top: 1px solid var(--line);
+    margin: 88px 0 0;
+  }
+
+  footer {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-muted);
+    font-size: 0.82rem;
+  }
+
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="page">
+
+  <span class="eyebrow">Architektura · fulltext-poc</span>
+  <h1>Anatomie fulltext-poc</h1>
+  <p class="lede">
+    Devět služeb, jeden hostitel, systemd jako orchestrátor. Diagram níže barevně
+    rozlišuje, co je <strong>vlastní kód</strong>, co je <strong>krabicová komponenta
+    beze změny</strong>, co je <strong>krabicová komponenta s vlastním laděním</strong>
+    a co je <strong>nasazovací a orchestrační vrstva</strong>. Druhá část navrhuje,
+    co by se muselo změnit, aby z tohoto PoC byla produkce.
+  </p>
+
+  <div class="legend">
+    <span class="legend-item"><span class="legend-swatch" style="border-color:var(--accent);background:color-mix(in srgb, var(--accent) 15%, var(--surface))"></span>vlastní aplikační kód</span>
+    <span class="legend-item"><span class="legend-swatch" style="border-color:var(--config);background:color-mix(in srgb, var(--config) 15%, var(--surface))"></span>krabicová komponenta — jen konfigurace</span>
+    <span class="legend-item"><span class="legend-swatch" style="border-color:var(--tuning);background:color-mix(in srgb, var(--tuning) 15%, var(--surface))"></span>krabicová komponenta — <small>+ vlastní laděný artefakt</small></span>
+    <span class="legend-item"><span class="legend-swatch" style="border-color:var(--deploy);background:color-mix(in srgb, var(--deploy) 15%, var(--surface));border-style:dashed"></span>nasazovací a orchestrační vrstva</span>
+  </div>
+
+  <h2><span class="num">01</span>Jak to běží dnes</h2>
+  <p class="section-intro">
+    Vše běží na jednom hostiteli, kde systemd
+    dohlíží na běh jednotlivých kontejnerů a Ansible playbook se stará o
+    nasazení. Silné čáry ukazují skutečný tok dat mezi komponentami, ne jen
+    že spolu „nějak souvisí“.
+  </p>
+
+  <figure>
+    <div class="diagram-frame">
+      <svg viewBox="0 0 1180 560" role="img" aria-label="Architektura fulltext-poc: klient přes Tailscale volá ingest-api a search-api; ingest-api a scanner zapisují do RustFS, Postgresu a fronty Redis/Valkey; worker frontu vybírá, volá Tiku pro extrakci textu, indexuje do OpenSearch a aktualizuje stav v Postgresu; search-api dotazuje OpenSearch a generuje presigned odkazy z RustFS; OpenSearch Dashboards volitelně čte OpenSearch. Vše běží pod jedním rámcem systemd jednotek nasazeným Ansible.">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-muted)"/>
+          </marker>
+        </defs>
+
+        <!-- deployment frame -->
+        <rect x="10" y="150" width="1160" height="370" rx="10" fill="none" stroke="var(--deploy)" stroke-width="2" stroke-dasharray="7 5"/>
+        <text x="26" y="140" font-family="var(--font-mono)" font-size="12" fill="var(--deploy)">SYSTEMD JEDNOTKY · 1 HOSTITEL — NASAZENO ANSIBLE</text>
+
+        <!-- Tailscale entry -->
+        <rect x="200" y="40" width="780" height="50" rx="6" fill="var(--surface-2)" stroke="var(--ink-muted)" stroke-width="1.5"/>
+        <text x="590" y="70" text-anchor="middle" font-family="var(--font-body)" font-size="14" font-weight="600" fill="var(--ink)">klient (přes Tailscale)</text>
+
+        <!-- app layer -->
+        <g font-family="var(--font-body)">
+          <rect x="20" y="170" width="260" height="80" rx="6" fill="color-mix(in srgb, var(--accent) 10%, var(--surface))" stroke="var(--accent)" stroke-width="2"/>
+          <text x="150" y="205" text-anchor="middle" font-size="16" font-weight="700" fill="var(--ink)">ingest-api</text>
+          <text x="150" y="225" text-anchor="middle" font-size="11" fill="var(--ink-muted)">FastAPI · :8081</text>
+
+          <rect x="313" y="170" width="260" height="80" rx="6" fill="color-mix(in srgb, var(--accent) 10%, var(--surface))" stroke="var(--accent)" stroke-width="2"/>
+          <text x="443" y="205" text-anchor="middle" font-size="16" font-weight="700" fill="var(--ink)">scanner</text>
+          <text x="443" y="225" text-anchor="middle" font-size="11" fill="var(--ink-muted)">periodický sweep S3</text>
+
+          <rect x="606" y="170" width="260" height="80" rx="6" fill="color-mix(in srgb, var(--accent) 10%, var(--surface))" stroke="var(--accent)" stroke-width="2"/>
+          <text x="736" y="205" text-anchor="middle" font-size="16" font-weight="700" fill="var(--ink)">worker</text>
+          <text x="736" y="225" text-anchor="middle" font-size="11" fill="var(--ink-muted)">extrakce + indexace</text>
+
+          <rect x="899" y="170" width="260" height="80" rx="6" fill="color-mix(in srgb, var(--accent) 10%, var(--surface))" stroke="var(--accent)" stroke-width="2"/>
+          <text x="1029" y="205" text-anchor="middle" font-size="16" font-weight="700" fill="var(--ink)">search-api</text>
+          <text x="1029" y="225" text-anchor="middle" font-size="11" fill="var(--ink-muted)">FastAPI · :8080</text>
+        </g>
+
+        <!-- storage layer -->
+        <g font-family="var(--font-body)">
+          <rect x="20" y="420" width="160" height="80" rx="6" fill="color-mix(in srgb, var(--config) 10%, var(--surface))" stroke="var(--config)" stroke-width="2"/>
+          <text x="100" y="452" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">RustFS</text>
+          <text x="100" y="470" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">S3, výchozí image</text>
+
+          <rect x="216" y="420" width="160" height="80" rx="6" fill="color-mix(in srgb, var(--tuning) 10%, var(--surface))" stroke="var(--config)" stroke-width="2"/>
+          <text x="296" y="452" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">Postgres</text>
+          <text x="296" y="470" text-anchor="middle" font-size="10.5" fill="var(--tuning)">+ 001-schema.sql</text>
+
+          <rect x="412" y="420" width="160" height="80" rx="6" fill="color-mix(in srgb, var(--config) 10%, var(--surface))" stroke="var(--config)" stroke-width="2"/>
+          <text x="492" y="452" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">Redis/Valkey</text>
+          <text x="492" y="470" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">fronta, výchozí image</text>
+
+          <rect x="608" y="420" width="160" height="80" rx="6" fill="color-mix(in srgb, var(--tuning) 10%, var(--surface))" stroke="var(--config)" stroke-width="2"/>
+          <text x="688" y="452" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">Tika</text>
+          <text x="688" y="470" text-anchor="middle" font-size="10.5" fill="var(--tuning)">+ tika-config.xml</text>
+
+          <rect x="804" y="420" width="160" height="80" rx="6" fill="color-mix(in srgb, var(--tuning) 10%, var(--surface))" stroke="var(--config)" stroke-width="2"/>
+          <text x="884" y="452" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">OpenSearch</text>
+          <text x="884" y="470" text-anchor="middle" font-size="10.5" fill="var(--tuning)">+ index-template, hunspell</text>
+
+          <rect x="1000" y="420" width="160" height="80" rx="6" fill="var(--surface)" stroke="var(--config)" stroke-width="2" stroke-dasharray="5 4"/>
+          <text x="1080" y="452" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Dashboards</text>
+          <text x="1080" y="470" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">volitelné, :5601</text>
+        </g>
+
+        <!-- arrows: tailscale down -->
+        <line x1="150" y1="90" x2="150" y2="168" stroke="var(--ink-muted)" stroke-width="1.6" marker-end="url(#arrow)"/>
+        <rect x="108" y="120" width="84" height="16" fill="var(--surface)"/>
+        <text x="150" y="132" text-anchor="middle" font-family="var(--font-mono)" font-size="10.5" fill="var(--ink-muted)">nahrání</text>
+
+        <line x1="1029" y1="90" x2="1029" y2="168" stroke="var(--ink-muted)" stroke-width="1.6" marker-end="url(#arrow)"/>
+        <rect x="985" y="120" width="88" height="16" fill="var(--surface)"/>
+        <text x="1029" y="132" text-anchor="middle" font-family="var(--font-mono)" font-size="10.5" fill="var(--ink-muted)">hledání/UI</text>
+
+        <!-- ingest-api fanout -->
+        <line x1="120" y1="250" x2="100" y2="418" stroke="var(--ink-muted)" stroke-width="1.4" marker-end="url(#arrow)"/>
+        <rect x="82" y="330" width="26" height="14" fill="var(--surface)"/>
+        <text x="95" y="341" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">PUT</text>
+
+        <line x1="180" y1="250" x2="270" y2="418" stroke="var(--ink-muted)" stroke-width="1.4" marker-end="url(#arrow)"/>
+        <rect x="225" y="325" width="46" height="14" fill="var(--surface)"/>
+        <text x="248" y="336" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">INSERT</text>
+
+        <line x1="250" y1="250" x2="460" y2="418" stroke="var(--ink-muted)" stroke-width="1.4" marker-end="url(#arrow)"/>
+        <rect x="330" y="315" width="52" height="14" fill="var(--surface)"/>
+        <text x="356" y="326" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">enqueue</text>
+
+        <!-- scanner fanout -->
+        <line x1="360" y1="250" x2="150" y2="418" stroke="var(--ink-muted)" stroke-width="1.4" marker-end="url(#arrow)"/>
+        <rect x="220" y="345" width="22" height="14" fill="var(--surface)"/>
+        <text x="231" y="356" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">list</text>
+
+        <line x1="423" y1="250" x2="330" y2="418" stroke="var(--ink-muted)" stroke-width="1.4" marker-end="url(#arrow)"/>
+        <rect x="345" y="358" width="22" height="14" fill="var(--surface)"/>
+        <text x="356" y="369" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">diff</text>
+
+        <line x1="490" y1="250" x2="492" y2="418" stroke="var(--ink-muted)" stroke-width="1.4" marker-end="url(#arrow)"/>
+        <rect x="466" y="325" width="52" height="14" fill="var(--surface)"/>
+        <text x="492" y="336" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">enqueue</text>
+
+        <!-- redis -> worker (upward) -->
+        <line x1="530" y1="418" x2="680" y2="252" stroke="var(--ink-muted)" stroke-width="1.6" stroke-dasharray="1 0" marker-end="url(#arrow)"/>
+        <rect x="565" y="330" width="52" height="14" fill="var(--surface)"/>
+        <text x="591" y="341" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">BLPOP</text>
+
+        <!-- worker -> tika, opensearch, postgres -->
+        <line x1="736" y1="250" x2="688" y2="418" stroke="var(--ink-muted)" stroke-width="1.4" marker-end="url(#arrow)"/>
+        <rect x="655" y="325" width="58" height="14" fill="var(--surface)"/>
+        <text x="684" y="336" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">extrakce</text>
+
+        <line x1="800" y1="250" x2="870" y2="418" stroke="var(--ink-muted)" stroke-width="1.4" marker-end="url(#arrow)"/>
+        <rect x="815" y="335" width="38" height="14" fill="var(--surface)"/>
+        <text x="834" y="346" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">index</text>
+
+        <line x1="670" y1="250" x2="330" y2="418" stroke="var(--ink-muted)" stroke-width="1.4" marker-end="url(#arrow)"/>
+        <rect x="470" y="375" width="42" height="14" fill="var(--surface)"/>
+        <text x="491" y="386" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">status</text>
+
+        <!-- search-api -> opensearch, rustfs -->
+        <line x1="1000" y1="250" x2="898" y2="418" stroke="var(--ink-muted)" stroke-width="1.4" marker-end="url(#arrow)"/>
+        <rect x="935" y="330" width="40" height="14" fill="var(--surface)"/>
+        <text x="955" y="341" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">dotaz</text>
+
+        <line x1="920" y1="255" x2="130" y2="418" stroke="var(--ink-muted)" stroke-width="1.3" stroke-opacity="0.75" marker-end="url(#arrow)"/>
+        <rect x="500" y="345" width="54" height="14" fill="var(--surface)"/>
+        <text x="527" y="356" text-anchor="middle" font-family="var(--font-mono)" font-size="9.5" fill="var(--ink-muted)">presign</text>
+
+        <!-- opensearch -> dashboards -->
+        <line x1="964" y1="460" x2="998" y2="460" stroke="var(--ink-muted)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+      </svg>
+    </div>
+    <figcaption>
+      Devět běžících služeb, jeden hostitel. <span class="chip chip--code">kód</span> = aplikační vrstva
+      napsaná pro tento projekt; <span class="chip chip--std">standard</span> = image beze změny;
+      <span class="chip chip--tune">standard + ladění</span> = image, ale s vlastním schématem/šablonou/konfigem;
+      přerušovaný rámec = nasazovací a orchestrační vrstva.
+    </figcaption>
+  </figure>
+
+  <h3>Kompletní přehled komponent</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Komponenta</th><th>Kategorie</th><th>Co to obnášelo</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="name">ingest-api</td>
+          <td><span class="chip chip--code">vlastní kód</span></td>
+          <td class="note">FastAPI: upload, dedup podle hashe, zápis do S3 + Postgres v jedné transakci, presigned odkazy, <code>/events</code>.</td>
+        </tr>
+        <tr>
+          <td class="name">worker</td>
+          <td><span class="chip chip--code">vlastní kód</span></td>
+          <td class="note">Volání Tiky, indexace do OpenSearch, cache podle sidecar souboru, heuristika <code>needs_ocr</code>.</td>
+        </tr>
+        <tr>
+          <td class="name">scanner</td>
+          <td><span class="chip chip--code">vlastní kód</span></td>
+          <td class="note">Periodický <code>ListObjectsV2</code> sweep, diff proti Postgresu podle (bucket, klíč, etag).</td>
+        </tr>
+        <tr>
+          <td class="name">search-api</td>
+          <td><span class="chip chip--code">vlastní kód</span></td>
+          <td class="note"><code>/search</code>, escapování highlightů z nedůvěryhodného obsahu, minimální vyhledávací UI.</td>
+        </tr>
+        <tr>
+          <td class="name">ftpoc CLI</td>
+          <td><span class="chip chip--code">vlastní kód</span></td>
+          <td class="note"><code>bootstrap</code>, <code>s3-probe</code>, <code>reindex</code>, <code>backfill</code>.</td>
+        </tr>
+        <tr>
+          <td class="name">RustFS</td>
+          <td><span class="chip chip--std">standard</span></td>
+          <td class="note">Jen proměnné prostředí (klíče, porty) — žádný vlastní konfigurační soubor.</td>
+        </tr>
+        <tr>
+          <td class="name">Redis / Valkey</td>
+          <td><span class="chip chip--std">standard</span></td>
+          <td class="note">Výchozí image beze změny, funguje jako fronta pro joby workeru.</td>
+        </tr>
+        <tr>
+          <td class="name">OpenSearch Dashboards</td>
+          <td><span class="chip chip--std">standard</span></td>
+          <td class="note">Volitelná služba (opt-in), beze změny konfigurace, jen síťové propojení.</td>
+        </tr>
+        <tr>
+          <td class="name">Postgres</td>
+          <td><span class="chip chip--tune">standard + ladění</span></td>
+          <td class="note">Vlastní <code>001-schema.sql</code> (tabulka <code>document</code> se stavovým strojem).</td>
+        </tr>
+        <tr>
+          <td class="name">Tika</td>
+          <td><span class="chip chip--tune">standard + ladění</span></td>
+          <td class="note"><code>tika-config.xml</code>: fork-per-request izolace, timeouty pro nedůvěryhodné soubory.</td>
+        </tr>
+        <tr>
+          <td class="name">OpenSearch</td>
+          <td><span class="chip chip--tune">standard + ladění</span></td>
+          <td class="note">Vlastní <code>index-template.json</code> + hunspell slovník (česká lemmatizace, ne jen light stemmer).</td>
+        </tr>
+        <tr>
+          <td class="name">Ansible playbook</td>
+          <td><span class="chip chip--deploy">nasazení</span></td>
+          <td class="note">Instalace závislostí a vytvoření/spuštění systemd jednotek pro všechny kontejnery, síť a svazky na cílovém hostiteli.</td>
+        </tr>
+        <tr>
+          <td class="name">Systemd jednotky (síť, svazky, kontejnery)</td>
+          <td><span class="chip chip--deploy">nasazení</span></td>
+          <td class="note">10 unit souborů; pořadí startu (kdo čeká na koho, až bude zdravý) řeší <code>Notify=healthy</code> + <code>Requires=</code>/<code>After=</code>.</td>
+        </tr>
+        <tr>
+          <td class="name">Smoke test skript</td>
+          <td><span class="chip chip--deploy">nasazení</span></td>
+          <td class="note">Automatizované ověření nahrání dokumentu, extrakce, indexace a vyhledání po každém nasazení.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <hr class="div">
+
+  <h2><span class="num">02</span>PoC → produkce</h2>
+  <p class="section-intro">
+    Toto řešení bylo od začátku označené jako PoC a autor sám v dokumentaci
+    vyjmenoval, co vědomě neřeší: jeden uzel bez replikace, TLS na OpenSearch
+    vypnuté, žádné ACL na úrovni dokumentu, žádný OCR, hesla v prostém env
+    souboru, RustFS bez ověřené odolnosti proti výpadku disku. Produkční verze
+    musí každý z těchto bodů uzavřít — ne dohnat výkon, ale uzavřít rizika.
+  </p>
+
+  <figure>
+    <div class="diagram-frame">
+      <svg viewBox="0 0 1180 470" role="img" aria-label="Srovnání: PoC má vše na jednom hostiteli jako jedinou instanci bez šifrování a bez záloh. Produkční návrh přidává TLS ingress, N replik aplikační vrstvy škálovaných podle fronty, klastrované OpenSearch, Postgres s HA a PITR, replikované objektové úložiště, odolnou frontu, a okolní provozní vrstvu — správu tajemství, pozorovatelnost, CI/CD, OCR worker a ACL vrstvu.">
+        <defs>
+          <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-muted)"/>
+          </marker>
+        </defs>
+        <!-- Panel A -->
+        <rect x="20" y="60" width="520" height="380" rx="8" fill="var(--surface)" stroke="var(--ink-muted)" stroke-width="1.5" stroke-dasharray="6 5"/>
+        <text x="280" y="42" text-anchor="middle" font-family="var(--font-display)" font-weight="700" font-size="19" fill="var(--ink)">PoC (dnes)</text>
+
+        <rect x="60" y="100" width="200" height="60" rx="6" fill="color-mix(in srgb, var(--accent) 10%, var(--surface))" stroke="var(--accent)" stroke-width="2"/>
+        <text x="160" y="135" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">aplikace ×4</text>
+
+        <rect x="280" y="100" width="200" height="60" rx="6" fill="color-mix(in srgb, var(--config) 10%, var(--surface))" stroke="var(--config)" stroke-width="2"/>
+        <text x="380" y="135" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">data ×5</text>
+
+        <text x="60" y="200" font-family="var(--font-mono)" font-size="12" fill="var(--ink-muted)">1 replika všeho — SPOF</text>
+        <text x="60" y="228" font-family="var(--font-mono)" font-size="12" fill="var(--ink-muted)">hesla v env souboru</text>
+        <text x="60" y="256" font-family="var(--font-mono)" font-size="12" fill="var(--ink-muted)">TLS na OpenSearch vypnuté</text>
+        <text x="60" y="284" font-family="var(--font-mono)" font-size="12" fill="var(--ink-muted)">žádné ACL na dokument</text>
+        <text x="60" y="312" font-family="var(--font-mono)" font-size="12" fill="var(--ink-muted)">žádný OCR</text>
+        <text x="60" y="340" font-family="var(--font-mono)" font-size="12" fill="var(--ink-muted)">žádné zálohování / DR</text>
+        <text x="60" y="368" font-family="var(--font-mono)" font-size="12" fill="var(--ink-muted)">nasazení: Ansible ad-hoc</text>
+
+        <!-- Panel B -->
+        <rect x="620" y="60" width="540" height="380" rx="8" fill="var(--surface)" stroke="var(--deploy)" stroke-width="2"/>
+        <text x="890" y="42" text-anchor="middle" font-family="var(--font-display)" font-weight="700" font-size="19" fill="var(--ink)">Produkce (návrh)</text>
+
+        <rect x="660" y="90" width="460" height="42" rx="6" fill="var(--surface-2)" stroke="var(--ink-muted)" stroke-width="1.5"/>
+        <text x="890" y="116" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">TLS ingress / load balancer</text>
+        <line x1="890" y1="132" x2="890" y2="150" stroke="var(--ink-muted)" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+        <rect x="660" y="150" width="460" height="42" rx="6" fill="color-mix(in srgb, var(--accent) 10%, var(--surface))" stroke="var(--accent)" stroke-width="2"/>
+        <text x="890" y="176" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">aplikace — N replik (worker autoscale dle fronty)</text>
+        <line x1="890" y1="192" x2="890" y2="210" stroke="var(--ink-muted)" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+        <rect x="660" y="210" width="105" height="56" rx="6" fill="color-mix(in srgb, var(--config) 10%, var(--surface))" stroke="var(--config)" stroke-width="2"/>
+        <text x="712" y="234" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">OpenSearch</text>
+        <text x="712" y="250" text-anchor="middle" font-size="10" fill="var(--ink-muted)">3+ uzly</text>
+
+        <rect x="778" y="210" width="105" height="56" rx="6" fill="color-mix(in srgb, var(--config) 10%, var(--surface))" stroke="var(--config)" stroke-width="2"/>
+        <text x="830" y="230" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">Postgres</text>
+        <text x="830" y="244" text-anchor="middle" font-size="10" fill="var(--ink-muted)">HA</text>
+        <text x="830" y="257" text-anchor="middle" font-size="10" fill="var(--ink-muted)">+ PITR</text>
+
+        <rect x="896" y="210" width="105" height="56" rx="6" fill="color-mix(in srgb, var(--config) 10%, var(--surface))" stroke="var(--config)" stroke-width="2"/>
+        <text x="948" y="230" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">objekty</text>
+        <text x="948" y="244" text-anchor="middle" font-size="10" fill="var(--ink-muted)">S3 / Ceph</text>
+        <text x="948" y="257" text-anchor="middle" font-size="10" fill="var(--ink-muted)">replikováno</text>
+
+        <rect x="1014" y="210" width="105" height="56" rx="6" fill="color-mix(in srgb, var(--config) 10%, var(--surface))" stroke="var(--config)" stroke-width="2"/>
+        <text x="1066" y="234" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">fronta</text>
+        <text x="1066" y="250" text-anchor="middle" font-size="10" fill="var(--ink-muted)">durabilní</text>
+
+        <g font-family="var(--font-mono)">
+          <rect x="660" y="300" width="130" height="34" rx="16" fill="none" stroke="var(--tuning)" stroke-width="1.5"/>
+          <text x="725" y="322" text-anchor="middle" font-size="11" fill="var(--tuning)">secrets manager</text>
+
+          <rect x="805" y="300" width="150" height="34" rx="16" fill="none" stroke="var(--tuning)" stroke-width="1.5"/>
+          <text x="880" y="322" text-anchor="middle" font-size="11" fill="var(--tuning)">pozorovatelnost</text>
+
+          <rect x="970" y="300" width="150" height="34" rx="16" fill="none" stroke="var(--tuning)" stroke-width="1.5"/>
+          <text x="1045" y="322" text-anchor="middle" font-size="11" fill="var(--tuning)">CI/CD + registry</text>
+
+          <rect x="660" y="350" width="150" height="34" rx="16" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="735" y="372" text-anchor="middle" font-size="11" fill="var(--accent)">OCR worker (nový)</text>
+
+          <rect x="825" y="350" width="180" height="34" rx="16" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="915" y="372" text-anchor="middle" font-size="11" fill="var(--accent)">ACL vrstva v search-api</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>
+      Vlevo jediný hostitel se vším; vpravo replikovaná aplikační i datová vrstva
+      a přidaná provozní vrstva, která v PoC chybí úplně.
+    </figcaption>
+  </figure>
+
+  <div class="rec-grid">
+    <div class="rec-card">
+      <h4 style="color:var(--config)">Vysoká dostupnost</h4>
+      <ul>
+        <li>OpenSearch jako <strong>klastr 3+ uzlů</strong> s vyhrazenými master uzly, ne single-node.</li>
+        <li>Postgres v <strong>HA</strong> (primary + replika, PITR zálohy) — je to autoritativní zdroj metadat.</li>
+        <li>Objektové úložiště buď spravovaný S3, nebo ověřený Ceph/MinIO klastr — RustFS nemá ověřenou odolnost proti výpadku disku.</li>
+        <li>Fronta s trvalostí a replikací místo holého Redis/Valkey bez perzistence.</li>
+        <li>Worker škálovaný <strong>podle hloubky fronty</strong>, ne fixní počet replik.</li>
+      </ul>
+    </div>
+    <div class="rec-card">
+      <h4 style="color:var(--accent)">Zabezpečení</h4>
+      <ul>
+        <li>TLS <strong>zapnuté</strong> na OpenSearch i mezi službami, ne jen na hraně.</li>
+        <li>Reálný správce tajemství (Vault, cloudový secrets manager) místo hesel v env souborech.</li>
+        <li><strong>ACL na úroveň dokumentu</strong> v search-api — dnes explicitně chybí, nutné pro náhradu FileNetu.</li>
+        <li>Síťová segmentace místo jediné adresy/portu — soukromé podsítě, firewall pravidla.</li>
+        <li>Rootless kontejnery, read-only root filesystem, seccomp — dnes rootful pro jednoduchost/paritu.</li>
+      </ul>
+    </div>
+    <div class="rec-card">
+      <h4 style="color:var(--tuning)">Pozorovatelnost</h4>
+      <ul>
+        <li>Centralizované logy (dnes jen per-host journald).</li>
+        <li>Metriky hloubky fronty, latence indexace, chybovosti (Prometheus/Grafana).</li>
+        <li>Alerting na stav fronty a na <code>needs_ocr</code>/<code>error</code> nárůst.</li>
+      </ul>
+    </div>
+    <div class="rec-card">
+      <h4 style="color:var(--deploy)">CI/CD a nasazení</h4>
+      <ul>
+        <li>Image se buildí v pipeline a jde do privátního registru — ne ručně přes Ansible task.</li>
+        <li>Automatizované testy (smoke testy z tohoto PoC jsou dobrý základ) jako brána před nasazením.</li>
+        <li>GitOps namísto imperativního <code>ansible-playbook</code> z laptopu.</li>
+        <li>Kubernetes (nebo Nomad) namísto jednoho hostitele pro multi-node odolnost.</li>
+      </ul>
+    </div>
+    <div class="rec-card">
+      <h4 style="color:var(--accent)">OCR pipeline</h4>
+      <ul>
+        <li>PoC dokumenty s málo extrahovatelným textem jen označí <code>needs_ocr</code> a vynechá.</li>
+        <li>Produkce potřebuje samostatný OCR worker (<code>ocrmypdf</code>), který OCR'd PDF zapíše zpět a znovu zařadí do fronty.</li>
+      </ul>
+    </div>
+    <div class="rec-card">
+      <h4 style="color:var(--config)">Compliance a retence</h4>
+      <ul>
+        <li>Pokud jde o právně závazné dokumenty (náhrada FileNetu), ověřit WORM/Object Lock nezávisle — PoC to netestuje.</li>
+        <li>Auditní log přístupů k dokumentům, ne jen aplikační log.</li>
+        <li>Testovaná procedura obnovy ze zálohy, ne jen existence zálohy.</li>
+      </ul>
+    </div>
+  </div>
+
+  <footer>
+    Vychází z <code>fulltext-poc</code> nasazeného na testovacím hostiteli.
+    Diagramy popisují stav k okamžiku vydání této stránky.
+  </footer>
+
+</div>
+</body>
+</html>
