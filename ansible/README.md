@@ -97,18 +97,47 @@ template) as a one-off `podman run`. Safe to re-run - re-rendering identical
 quadlet files is a no-op, `systemctl` treats an already-running unit as
 already satisfied, and bootstrap itself is idempotent.
 
-Smoke tests (`ftpoc_run_smoke_tests=true`) are **not supported** on this path
-- `make probe`/`make hello` drive `podman-compose`, which would try to stand
+Smoke tests are opt-in (`ftpoc_run_smoke_tests=true`):
+```
+ansible-playbook playbook.yml --ask-vault-pass -e ftpoc_run_smoke_tests=true
+```
+This runs the Phase 1.5 S3-compatibility probe and the Phase 5 end-to-end
+hello-world test from the fulltext-poc README, but **not** via `make
+probe`/`make hello` - those drive `podman-compose`, which would try to stand
 up its own network/containers on the same ports this role's systemd units
-already own. Setting that variable makes the playbook fail with an explicit
-message rather than silently conflict. Verify manually instead, e.g.:
-```
-curl http://127.0.0.1:8081/healthz   # ingest-api
-curl http://127.0.0.1:8080/healthz   # search-api
-systemctl status 'rustfs.service' 'opensearch.service' 'tika.service' \
-  'redis.service' 'postgres.service' 'ingest-api.service' 'worker.service' \
-  'scanner.service' 'search-api.service'
-```
+already own. Instead it's `fulltext-poc/scripts/smoke-test-podman.sh` (a
+podman-native port of `smoke-test.sh`: plain `podman run`/`exec`/`logs`
+against the same image, the `ftpoc` network, and the running `postgres`/
+`worker` containers, reading `ftpoc-secrets.env`/`ftpoc-app.env` instead of a
+compose-style `.env`) plus an inline probe task mirroring the Makefile's
+`probe` target - except that task's final "is the presigned URL actually
+reachable" check runs `delegate_to: localhost` (from the control node, not
+the target) for the reason in the gotchas section below. `smoke-test-podman.sh`'s
+own equivalent check (Assert E, `download_url`) has no such delegation - it
+runs entirely on the target, so on a host whose tailscaled is in
+`--tun=userspace-networking` mode, Assert E can fail even though the stack is
+genuinely fine, because the target can't curl its own public tailnet hostname
+in that mode (see gotchas below). Treat an Assert-E-only failure on such a
+host as inconclusive, not as evidence of a real problem, unless you also
+check reachability from a separate peer.
+
+Uploads a generated test PDF into the real bucket/index, so
+it's still opt-in, not run on every deploy. Needs `jq` on the target (the
+`podman` role installs it).
+
+**Assert D is only meaningful on a fresh run.** It re-uploads the same
+`hello-smlouva.pdf` and expects a "Sidecar cache hit" log line from `worker`
+proving Tika was skipped the second time. `hello-smlouva.pdf`'s content (and
+so its SHA-256) never changes, so on a *repeated* run against the same
+still-populated `postgres`/`opensearch` data, `ingest-api` already recognizes
+the hash as fully indexed and doesn't re-enqueue a worker job at all - there's
+nothing left for the worker to log a cache hit about, and this half of Assert
+D fails even though nothing is actually wrong (confirmed by checking `podman
+logs worker` directly: the cache-hit line is there from whichever run first
+saw this exact file). Re-running smoke tests against a target that already
+has hello-world data from a prior run will reproduce this; it's not a
+Podman-specific issue, just a property of the test relying on the document
+being new.
 
 ## Known environment gotchas (found deploying into an LXC guest)
 
@@ -145,6 +174,16 @@ on any container-based (as opposed to full-VM) target:
   `ftpoc_bind_addr` at the `127.0.0.1` default already gets tailnet-only
   reachability - binding to the literal interface address is only necessary
   on hosts where tailscaled has a real TUN device.
+- **The same userspace-networking mode breaks self-curl of the public
+  hostname.** The inbound proxy-to-127.0.0.1 trick above only helps
+  connections arriving *from* the tailnet. A process on the target trying to
+  curl its own `ftpoc_public_host` (e.g. inside `smoke-test-podman.sh`, or
+  the S3 probe's presigned-URL check) has no real interface to route an
+  *outbound* connection to its own Tailscale IP through, and fails to
+  connect - not a sign the stack is broken, just that this one host can't
+  reach itself that way. The probe task in this role works around it by
+  curling the presigned URL `delegate_to: localhost` (the control node,
+  genuinely a separate peer) instead of on the target.
 
 ## Notes
 

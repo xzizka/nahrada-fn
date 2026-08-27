@@ -125,15 +125,71 @@
     localhost/ftpoc-poc:local python -m ftpoc.cli bootstrap
   changed_when: true
 
-# Not wired up yet: make probe/make hello drive podman-compose against
-# docker-compose.yml, which would try to (re)create its own network/containers
-# on the same ports the quadlet-managed stack above already owns. Running
-# them here would conflict rather than test anything.
-- name: Fail clearly if smoke tests were requested (unsupported on the quadlet path)
-  ansible.builtin.fail:
-    msg: >-
-      ftpoc_run_smoke_tests is not supported by the quadlet deployment path -
-      make probe/make hello drive podman-compose, which would conflict with
-      the systemd-managed stack this role just started (same ports/network).
-      Verify manually instead, e.g. `curl http://127.0.0.1:8080/healthz`.
+# make probe/make hello drive podman-compose against docker-compose.yml,
+# which would conflict with the systemd-managed stack above (same ports,
+# separate network) - these are podman-native equivalents instead: plain
+# `podman run`/`exec`/`logs` against the same image, network, and containers
+# the quadlet units created. Off by default; opt in with ftpoc_run_smoke_tests.
+- name: "Smoke test: S3 API compatibility probe"
+  ansible.builtin.command: >-
+    podman run --rm --network ftpoc --env-file {{ ftpoc_deploy_dir }}/ftpoc-app.env
+    localhost/ftpoc-poc:local python -m ftpoc.cli s3-probe
+  args:
+    chdir: "{{ ftpoc_deploy_dir }}"
+  register: ftpoc_probe_result
+  changed_when: false
+  when: ftpoc_run_smoke_tests | bool
+
+- name: Show probe output
+  ansible.builtin.debug:
+    var: ftpoc_probe_result.stdout_lines
+  when: ftpoc_run_smoke_tests | bool
+
+- name: Extract the presigned URL from the probe output
+  ansible.builtin.set_fact:
+    ftpoc_presigned_url: >-
+      {{ ftpoc_probe_result.stdout_lines
+         | select('match', '^PRESIGNED_URL: ')
+         | first
+         | regex_replace('^PRESIGNED_URL: ', '') }}
+  when: ftpoc_run_smoke_tests | bool
+
+# Fetched from the control node, not the target itself: on a target whose
+# tailscaled runs in --tun=userspace-networking mode (see the README's
+# gotchas section), the target curling its OWN public tailnet hostname fails
+# - outbound connections have no real interface to route through, only the
+# inbound proxy-to-127.0.0.1 trick works. A genuinely separate peer (this
+# control node) is what actually proves the URL is externally reachable,
+# which is the point of the check.
+- name: Verify the presigned URL is reachable from the control node
+  ansible.builtin.uri:
+    url: "{{ ftpoc_presigned_url }}"
+    status_code: 200
+  delegate_to: localhost
+  become: false
+  when: ftpoc_run_smoke_tests | bool
+
+- name: "Smoke test: generate the hello-world PDF"
+  ansible.builtin.command: >-
+    podman run --rm --user root -v {{ ftpoc_deploy_dir }}/scripts:/app/scripts
+    localhost/ftpoc-poc:local python scripts/make-hello-pdf.py scripts/hello-smlouva.pdf
+  args:
+    chdir: "{{ ftpoc_deploy_dir }}"
+  changed_when: true
+  when: ftpoc_run_smoke_tests | bool
+
+- name: "Smoke test: end-to-end hello-world (podman-native)"
+  ansible.builtin.command: bash scripts/smoke-test-podman.sh scripts/hello-smlouva.pdf
+  args:
+    chdir: "{{ ftpoc_deploy_dir }}"
+  environment:
+    BIND_ADDR: "{{ ftpoc_bind_addr }}"
+  register: ftpoc_hello_result
+  changed_when: false
+  failed_when: ftpoc_hello_result.rc != 0
+  when: ftpoc_run_smoke_tests | bool
+
+- name: Show hello-world smoke test output
+  ansible.builtin.debug:
+    var: ftpoc_hello_result.stdout_lines
   when: ftpoc_run_smoke_tests | bool
