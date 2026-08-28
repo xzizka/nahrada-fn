@@ -23,6 +23,16 @@ class SearchQueryBuilder:
                         "content.folded^1",
                         "filename^2",
                     ],
+                    # Typo tolerance: AUTO scales allowed edit distance with
+                    # term length (0 for 1-2 chars, 1 for 3-5, 2 for 6+) -
+                    # OpenSearch's own recommended default rather than a
+                    # fixed distance, which would be too lax on short terms
+                    # and too strict on long ones. prefix_length=1 keeps the
+                    # first character exact, which is both a common
+                    # least-surprise convention and cheaper to evaluate
+                    # (fewer candidate terms to edit-distance against).
+                    "fuzziness": "AUTO",
+                    "prefix_length": 1,
                 }
             },
             "highlight": {
