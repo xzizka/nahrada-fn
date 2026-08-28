@@ -106,12 +106,9 @@
     daemon_reload: true
   when: ftpoc_quadlet_files.changed
 
-# One transaction, not a task per service: systemd resolves the full
-# Requires=/After= graph regardless of the order listed here, and each
-# unit's Notify=healthy makes systemd block on that service's first
-# healthcheck pass before starting whatever depends on it - the same
-# ordering guarantee docker-compose.yml's depends_on/service_healthy gave.
-- name: Enable and start the ftpoc stack
+# rustfs/tika/redis run stock upstream images this playbook never rebuilds,
+# so "started" (create-if-missing, leave running otherwise) is enough.
+- name: Enable and start the infra services
   ansible.builtin.systemd:
     name: "{{ item }}"
     state: started
@@ -120,6 +117,22 @@
     - rustfs.service
     - tika.service
     - redis.service
+
+# postgres and the four app services all run images the two "Build the ...
+# image" tasks above just (re)built under the same tag every run. Podman
+# containers pin to the image ID at creation time, not the tag, so
+# `state: started` alone is a no-op once the unit is already active - it
+# would silently keep running the pre-rebuild container, never picking up a
+# code or schema change. `state: restarted` forces that; systemd's own
+# Requires=/After=/Notify=healthy graph still governs real ordering (e.g.
+# ingest-api only comes up once postgres reports healthy again), the same
+# guarantee docker-compose.yml's depends_on/service_healthy gave.
+- name: Enable and restart services running images built by this playbook
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: restarted
+    enabled: true
+  loop:
     - postgres.service
     - ingest-api.service
     - worker.service
