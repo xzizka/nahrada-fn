@@ -191,6 +191,22 @@ FROM opensearchproject/opensearch:3.8.0
 RUN /usr/share/opensearch/bin/opensearch-plugin install --batch analysis-icu
 ```
 
+## Typo tolerance: `fuzziness: AUTO`
+
+`search-api`'s query builder (`query.py`) sets `fuzziness: AUTO` and
+`prefix_length: 1` on the `multi_match` query. `AUTO` scales the allowed edit
+distance with term length (0 for 1-2 chars, 1 for 3-5, 2 for 6+) rather than a
+fixed distance, which would be too lax on short terms and too strict on long
+ones - this is OpenSearch's own recommended default. `prefix_length: 1` keeps
+the first character exact, both a common least-surprise convention and
+cheaper to evaluate (fewer candidate terms to edit-distance against).
+
+Verified live: a transposed-letter typo (`smluova` for `smlouva`) returns the
+same hit count as the exact spelling, and a typo combined with missing
+diacritics (`zaruca` for `záruka`) still matches. This stacks with hunspell
+lemmatization and `asciifolding` above, so a query can be misspelled, missing
+diacritics, and in an unlemmatized form, and still match.
+
 ## What this PoC deliberately does not solve
 
 - **No ACL.** `search-api` has no per-user access control. If the target
