@@ -1,10 +1,15 @@
 # fulltext-poc
 
 Fulltext search pipeline for document content (FileNet replacement scope: a
-content fulltext index, not a full ECM). RustFS (S3) for binaries, PostgreSQL
-for authoritative metadata, Tika for extraction, OpenSearch for the index.
-The index is derived and disposable - see `podman-compose stop tika && make
-reindex` in Phase 3 below.
+content fulltext index, not a full ECM). RustFS (S3) for binaries, Tika for
+extraction, PostgreSQL for both authoritative metadata *and* the full-text
+search index (via `to_tsvector`/hunspell, not a separate search engine - see
+"PostgreSQL full-text search" below). The index is derived and disposable -
+see `podman-compose stop tika && make reindex` in Phase 3 below.
+
+> **This is the `postgres-fts` branch.** `main` keeps the original
+> OpenSearch-based build; see `docs/opensearch-alternativy.md` for the
+> decision record behind this replacement.
 
 ## Prerequisites on the host
 
@@ -15,13 +20,9 @@ reindex` in Phase 3 below.
   --user ... -v ...` flag overrides used by `make hello`/`make lint`. If
   `podman-compose --version` reports something older, upgrade it rather than
   debugging startup-order or `make hello`/`make lint` failures first.
-- **`vm.max_map_count >= 262144`** - OpenSearch will not start otherwise.
-  ```
-  sudo sysctl -w vm.max_map_count=262144
-  echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-opensearch.conf
-  ```
-- At least ~6 GB RAM free (OpenSearch alone is given `-Xms2g -Xmx2g`; Tika,
-  RustFS, Postgres, Redis need headroom on top of that).
+- At least ~2 GB RAM free (no JVM in this stack anymore - removing OpenSearch
+  dropped the old ~6 GB / `-Xms2g -Xmx2g` requirement; Tika, RustFS,
+  Postgres, Redis are all comparatively light).
 - ~2 GB free disk for images plus space for your corpus.
 
 ## Quickstart
@@ -29,7 +30,7 @@ reindex` in Phase 3 below.
 ```
 cp .env.example .env        # then edit the generated secrets
 make up                     # brings up all services, waits for healthy
-make bootstrap               # creates the S3 bucket + OpenSearch index template
+make bootstrap               # creates the S3 bucket (search schema is created by postgres/*.sql on first DB init)
 make probe                  # Phase 1.5 - S3 API compatibility check
 make hello                  # Phase 5 - generates a Czech PDF, uploads it, asserts search works
 ```
@@ -83,8 +84,6 @@ with the new port bindings.
 |---|---|---|
 | RustFS (S3 API) | 9000 | yes |
 | RustFS (console) | 9001 | published, but see note below - not confirmed to actually serve a UI on `1.0.0-rc.3` |
-| OpenSearch | 9200 | yes |
-| OpenSearch Dashboards | 5601 | yes, `--profile dashboards` only |
 | Tika | 9998 | no - internal network only |
 | Queue (Valkey) | 6379 | no - internal network only |
 | PostgreSQL | 5432 | yes |
@@ -150,46 +149,54 @@ this compose file configures RustFS to actually call it - the assignment
 treats this as a latency optimization on top of the scanner, not a
 replacement for it, and the scanner alone is enough to pass Phase 5 Assert F.
 
-## OpenSearch security tradeoffs (lab-appropriate, not production)
+## PostgreSQL full-text search (no separate search engine)
 
-- Security plugin is **on** (basic auth via `OPENSEARCH_INITIAL_ADMIN_PASSWORD`).
-- HTTP-layer TLS is **off** (`plugins.security.ssl.http.enabled=false`) so
-  there's no self-signed-cert dance for a lab. In production, either turn
-  TLS back on or terminate it at an ingress and never publish OpenSearch's
-  port directly.
-- `OPENSEARCH_INITIAL_ADMIN_PASSWORD` must satisfy OpenSearch's built-in
-  complexity check (>=8 chars, upper+lower+digit+special) or the container
-  exits without an obvious log message - if `opensearch` won't go healthy,
-  check the password first.
+The search index *is* the `document` table: a `content` column (full
+extracted text) plus a `search_tsv` GENERATED column that recomputes
+itself on every write - see `postgres/002-fts.sql`. No refresh delay, no
+separate system to keep in sync, and no JVM. Full rationale and the
+alternatives considered: `docs/opensearch-alternativy.md`.
 
-## Czech analysis: hunspell, not the built-in `czech` analyzer
+Postgres's connection auth (`POSTGRES_PASSWORD`) is the only credential
+involved - there's no separate admin-password complexity check the way
+OpenSearch's security plugin had.
 
-The built-in OpenSearch `czech` analyzer uses a **light stemmer** (suffix
-rules only). Hunspell does real dictionary-based lemmatization, which is why
+## Czech analysis: hunspell via a custom `ispell` dictionary, not Postgres's built-in `czech` config
+
+Postgres's built-in `czech` text search configuration doesn't actually
+exist as shipped (Czech isn't one of the ~15 languages Postgres bundles a
+Snowball stemmer + stopword list for). `czech_hunspell` (defined in
+`postgres/002-fts.sql`) is a custom `ispell`-template dictionary built from
+the same hunspell dictionary this project always used, so it does real
+dictionary-based lemmatization rather than suffix stemming - which is why
 `make hello`'s Assert A (`smlouvám` -> matches a document that only contains
 `smlouva`) is the thing that actually proves the index is usable for a legal/
-contract corpus, not just that OpenSearch is up.
+contract corpus, not just that Postgres is up.
 
-`opensearch/hunspell/cs_CZ/{cs_CZ.aff,cs_CZ.dic}` come from
-`github.com/LibreOffice/dictionaries` via `scripts/fetch-hunspell.sh`, kept
-in whatever encoding the `.aff` file's own `SET` line declares - Lucene reads
-that line to decide how to interpret the dictionary, so transcoding the
-files without updating it silently breaks lookups.
+`postgres/hunspell/{cs_cz.dict,cs_cz.affix}` come from
+`github.com/LibreOffice/dictionaries` via `scripts/fetch-hunspell.sh` (same
+source as before, renamed to the `.dict`/`.affix` suffixes Postgres's
+`ispell` template expects) and are baked into a custom Postgres image at
+`postgres/Dockerfile`'s build time - Postgres reads them from
+`tsearch_data` lazily on first use, so they must already be present in the
+image, not mounted in afterward. Kept in UTF-8 (matching the `.affix` file's
+own declared `SET UTF-8` line and this stack's UTF8 database encoding) -
+unlike Lucene's hunspell filter, Postgres does not transcode based on that
+line, so if the database encoding ever changes these files need re-encoding
+to match.
 
-**RAM note**: the hunspell dictionary loads into memory on *every* data node.
-On a real multi-node cluster this is a line item in the RAM budget, not a
-rounding error.
+**RAM note**: the hunspell dictionary loads into Postgres's own memory on
+first use per backend process, same idea as OpenSearch's per-data-node load
+- on a real multi-connection deployment this is a line item in the RAM
+budget, not a rounding error, though far smaller in absolute terms without a
+JVM heap around it.
 
-**ICU folding upgrade path** (not wired into this build - kept to the
-official image on purpose): `asciifolding` is used for the diacritics-free
-field (`content.folded`) because it needs zero extra plugins. ICU folding
-handles more cases correctly but requires a custom image:
-
-```dockerfile
-# opensearch/Dockerfile.icu (not built by this compose file)
-FROM opensearchproject/opensearch:3.8.0
-RUN /usr/share/opensearch/bin/opensearch-plugin install --batch analysis-icu
-```
+Diacritics-free matching uses the `unaccent` extension (replacing
+OpenSearch's `asciifolding`) via a small `immutable_unaccent()` wrapper -
+see `postgres/002-fts.sql` for why the wrapper is needed. Fuzzy/typo
+tolerance (`pg_trgm`) was a runner-up idea in the decision doc but isn't
+wired in - a candidate future improvement, not a gap this build claims to
+close.
 
 ## What this PoC deliberately does not solve
 
@@ -207,7 +214,7 @@ RUN /usr/share/opensearch/bin/opensearch-plugin install --batch analysis-icu
   Deliberately not inside Tika - a standalone OCR step gives you control over
   timeout and cost that Tika-driven Tesseract doesn't.
 - **HTTP TLS is off** on OpenSearch's client-facing port (see above).
-- **RustFS and OpenSearch are both single-node**, no replication, no backup.
+- **RustFS and Postgres are both single-node**, no replication, no backup.
 - **`asciifolding` instead of ICU folding** (see above).
 - **No rate limiting** on `search-api`.
 - **No retention policy.** If the FileNet migration needs WORM guarantees,
@@ -379,3 +386,17 @@ by actually running the stack rather than by re-reading documentation.
     deleted by hand before reprocessing, since the pipeline's own
     dedup-by-sidecar logic would otherwise have kept trusting that empty
     result as "already extracted.")
+12. **OpenSearch replaced with PostgreSQL full-text search (this branch).**
+    Requested after a lightweight-alternatives research pass
+    (`docs/opensearch-alternativy.md`) found Postgres was the only
+    candidate that kept real hunspell lemmatization (reusing the same
+    `cs_cz.dict`/`cs_cz.affix` files) while adding zero new services, since
+    Postgres already ran in the stack as the metadata store. Verified
+    empirically against the real deployment target (`fn-pg`) before writing
+    any application code, not assumed from the doc's own "not turnkey" flag:
+    `to_tsvector('czech_hunspell', 'smlouvám')` lemmatizes to `smlouva`
+    through Postgres's `ispell` dictionary template exactly as it did
+    through OpenSearch's hunspell filter. `main` keeps the original
+    OpenSearch-based build; this branch (`postgres-fts`) replaces it
+    end-to-end - `indexing.py`/`query.py`/`search_api.py` now talk to
+    Postgres directly, and `opensearch/` is gone.

@@ -26,7 +26,10 @@ class DocumentRecord:
 
 
 class DocumentRepository:
-    """The only component that speaks to PostgreSQL. No SQL lives outside this class."""
+    """The only component that manages document *metadata* rows. Search
+    content/indexing SQL lives in ftpoc.indexing.DocumentIndexer instead -
+    both share the same `document` table now that Postgres is also the
+    search index, but each owns a disjoint set of columns."""
 
     def __init__(self, pool: ConnectionPool) -> None:
         self._pool = pool

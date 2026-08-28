@@ -6,35 +6,6 @@
       (found: {{ ansible_os_family }}).
   when: ansible_os_family not in ["Debian", "RedHat"]
 
-# fulltext-poc/README.md: "OpenSearch will not start otherwise." Only
-# written if actually too low: inside an LXC container, vm.max_map_count is
-# read-only from the guest even as root (it belongs to the host), and the
-# host commonly already sets it high enough for everything running in it.
-- name: Read the current vm.max_map_count
-  ansible.builtin.command: sysctl -n vm.max_map_count
-  register: ftpoc_max_map_count
-  changed_when: false
-
-- name: Set vm.max_map_count for OpenSearch (only if not already sufficient)
-  when: ftpoc_max_map_count.stdout | int < 262144
-  block:
-    - name: Set vm.max_map_count for OpenSearch
-      ansible.posix.sysctl:
-        name: vm.max_map_count
-        value: "262144"
-        sysctl_set: true
-        state: present
-        reload: true
-        sysctl_file: /etc/sysctl.d/99-opensearch.conf
-  rescue:
-    - name: Fail with an actionable message if the sysctl write was rejected
-      ansible.builtin.fail:
-        msg: >-
-          Could not raise vm.max_map_count to 262144 (currently
-          {{ ftpoc_max_map_count.stdout }}). If this host is an LXC
-          container, this sysctl can only be raised on the container host,
-          not from inside - set vm.max_map_count>=262144 there and re-run.
-
 - name: Install Podman, podman-compose, and supporting tools (Debian family)
   ansible.builtin.apt:
     name:

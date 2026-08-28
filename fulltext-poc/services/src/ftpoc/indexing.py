@@ -4,10 +4,8 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
-from opensearchpy import OpenSearch
-from opensearchpy.helpers import bulk
+from psycopg_pool import ConnectionPool
 
 logger = logging.getLogger(__name__)
 
@@ -27,51 +25,44 @@ class IndexableDocument:
 
 
 class DocumentIndexer:
-    """The only component that writes to OpenSearch. Always via _bulk."""
+    """The only component that writes searchable content. Writes `content`
+    into the same `document` row `DocumentRepository` manages - the
+    `search_tsv` GENERATED column (see postgres/002-fts.sql) recomputes
+    itself from that on every write, so there is no separate index to keep
+    in sync the way there was with OpenSearch."""
 
-    def __init__(self, client: OpenSearch, index_name: str) -> None:
-        self._client = client
-        self._index_name = index_name
+    def __init__(self, pool: ConnectionPool) -> None:
+        self._pool = pool
 
     def index_document(self, document: IndexableDocument) -> None:
         self.index_documents([document])
 
     def index_documents(self, documents: Iterable[IndexableDocument]) -> int:
-        actions = (
-            {
-                "_index": self._index_name,
-                "_id": doc.sha256,
-                "_source": {
-                    "content": doc.content,
-                    "filename": doc.filename,
-                    "s3_bucket": doc.s3_bucket,
-                    "s3_key": doc.s3_key,
-                    "sha256": doc.sha256,
-                    "content_type": doc.content_type,
-                    "size_bytes": doc.size_bytes,
-                    "tika_version": doc.tika_version,
-                    "extracted_at": doc.extracted_at.isoformat(),
-                    "indexed_at": doc.indexed_at.isoformat(),
-                },
-            }
-            for doc in documents
-        )
-        success_count, errors = bulk(self._client, actions, raise_on_error=True)
-        if errors:
-            raise RuntimeError(f"Bulk indexing reported errors: {errors}")
-        return int(success_count)
-
-    def put_index_template(self, name: str, template: dict[str, Any]) -> None:
-        self._client.indices.put_index_template(name=name, body=template)
+        count = 0
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            for doc in documents:
+                cur.execute(
+                    "UPDATE document SET content = %s WHERE sha256 = %s",
+                    (doc.content, doc.sha256),
+                )
+                count += cur.rowcount
+        return count
 
     def recreate_index(self) -> None:
-        if self._client.indices.exists(index=self._index_name):
-            self._client.indices.delete(index=self._index_name)
-        self._client.indices.create(index=self._index_name)
+        """No-op: unlike OpenSearch, there is no separate index to drop and
+        recreate. `search_tsv` is a GENERATED column that recomputes itself
+        from `content` on every write, so reindex_from_sidecars() rewriting
+        `content` for every indexed row (see pipeline.py) is itself the
+        rebuild."""
 
     def count(self) -> int:
-        result: dict[str, Any] = self._client.count(index=self._index_name)
-        return int(result["count"])
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM document WHERE content IS NOT NULL")
+            row = cur.fetchone()
+            assert row is not None
+            return int(row[0])
 
     def refresh(self) -> None:
-        self._client.indices.refresh(index=self._index_name)
+        """No-op: Postgres has no OpenSearch-style refresh/near-real-time
+        delay - a committed UPDATE is immediately visible to the GIN index
+        for the next query."""

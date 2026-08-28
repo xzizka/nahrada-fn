@@ -184,12 +184,12 @@
       .replace(/'/g, "&#39;");
   }
 
-  // Highlights come from OpenSearch as plain text with literal <em>/</em>
-  // markers wrapped around matched terms. That text originates from
-  // Tika-extracted, untrusted document content, so it must be escaped
-  // before insertion - only afterwards do we re-enable the specific <em>
-  // markers we ourselves asked OpenSearch to insert. Never render
-  // document-derived strings as raw HTML directly.
+  // Highlights come from search-api as plain text with literal <em>/</em>
+  // markers wrapped around matched terms (Postgres's ts_headline(), see
+  // ftpoc.query). That text originates from Tika-extracted, untrusted
+  // document content, so it must be escaped before insertion - only
+  // afterwards do we re-enable the specific <em> markers we ourselves
+  // asked for. Never render document-derived strings as raw HTML directly.
   function highlightToSafeHtml(text) {
     const escaped = escapeHtml(text);
     return escaped

@@ -10,8 +10,7 @@ API is young and unreliable to recall from memory.
 | Component | Image:tag | Why this tag |
 |---|---|---|
 | Object storage | `rustfs/rustfs:1.0.0-rc.3` | Newest published tag on Docker Hub at research time. RustFS ships no numbered stable release yet (1.0.0 is still in `-rc`), which is itself the flag: see "RustFS-specific findings" below. |
-| Search index | `opensearchproject/opensearch:3.8.0` | Latest 3.x release on Docker Hub. |
-| Index UI | `opensearchproject/opensearch-dashboards:3.8.0` | Matched to the OpenSearch server version - Dashboards requires a matching major.minor. |
+| Search index | `postgres:18.6-bookworm` (custom-built, see `postgres/Dockerfile`) | Same Postgres image already used as the metadata store - see "PostgreSQL full-text search" below for why this replaced OpenSearch. |
 | Text extraction | `apache/tika:3.3.1.0-full` | Latest **stable, non-preview** `-full` tag. `4.0.0-full` exists but was cut 3 days before this build and is a major version bump - **confirmed via `javap` against the real 4.0.0 jar** that it removes the fork-per-request isolation model entirely (`setNoFork`/`setTaskTimeoutMillis`/`setForkedJvmArgs`/etc are all gone from `TikaServerConfig`, replaced by an async `allowPipes` job-submission model). Using 4.0.0 with this pipeline's current synchronous `/tika`+`/meta` calls would mean a malformed document runs with no process isolation at all - a regression against the assignment's explicit isolation requirement. User confirmed staying on 3.3.1.0-full for this build rather than taking on the pipes-API rewrite. |
 | Queue | `valkey/valkey:9.1.1` | User-requested swap from `redis:8.2-alpine`. Valkey is the Linux Foundation's BSD-3 Redis-protocol-compatible fork; confirmed via `docker inspect`/`docker run` that the image exposes both `valkey-cli` and a `redis-cli` shim on the same port 6379, so the `redis` Python client library and RESP protocol usage in this codebase are unaffected. Redis itself relicensed back to AGPLv3 as of 8.0, so this swap is not solving a licensing problem, just a preference. |
 | Metadata store | `postgres:18.6-bookworm` | User-requested upgrade from `postgres:17.11-bookworm`. Latest 18.x point release, confirmed to exist on Docker Hub. |
@@ -79,15 +78,37 @@ gap unconditionally. `ingest-api`'s `POST /events` endpoint exists and accepts
 an S3-notification-shaped body, ready to be pointed at by a configured
 RustFS webhook target later.
 
-**Hunspell filter placement** (OpenSearch, not RustFS - well-established
-Lucene/Elasticsearch/OpenSearch behavior, not re-verified against young
-project docs): dictionaries live under
-`$OPENSEARCH_PATH_CONF/hunspell/<locale>/*.{aff,dic}` -
-`/usr/share/opensearch/config/hunspell/cs_CZ/` for the official image, where
-`OPENSEARCH_PATH_CONF` defaults to `/usr/share/opensearch/config`. Filter type
-is `hunspell` with `locale` and `dedup` parameters. This ships in OpenSearch
-core (`analysis-common`), not a separate plugin - confirmed against the
-running container in Phase 2, per the phase's acceptance criterion.
+## PostgreSQL full-text search (replaces OpenSearch)
+
+Decision record: `docs/opensearch-alternativy.md`. OpenSearch is fully
+removed on this branch (`postgres-fts`) - `main` keeps the original
+OpenSearch-based build.
+
+**Hunspell dictionary placement** (Postgres's `ispell` text search
+dictionary template, not RustFS): files live under
+`$(pg_config --sharedir)/tsearch_data/`, confirmed empirically against the
+real `postgres:18.6-bookworm` image to be `/usr/share/postgresql/18/tsearch_data/`
+- `DictFile`/`AffFile` parameters are base names Postgres appends
+`.dict`/`.affix` to itself, so the same LibreOffice-sourced
+`cs_CZ.aff`/`cs_CZ.dic` files used by the old OpenSearch build are renamed
+to `cs_cz.affix`/`cs_cz.dict` (see `scripts/fetch-hunspell.sh`,
+`postgres/Dockerfile`). Verified end-to-end on the real deployment target
+(`fn-pg`, an AlmaLinux 9 LXC guest) before writing any application code:
+`to_tsvector('czech_hunspell', 'smlouvám')` correctly lemmatizes to
+`smlouva`, matching the OpenSearch build's `make hello` Assert A.
+
+Czech is not one of Postgres's ~15 built-in text search configurations
+(confirmed: the base image ships no `czech.stop` stopwords file, and
+`CREATE TEXT SEARCH CONFIGURATION ... (COPY = pg_catalog.czech)` fails
+outright) - the custom `czech_hunspell` configuration copies `pg_catalog.simple`
+instead and overrides only the word-like token mappings, per postgres/002-fts.sql.
+
+`unaccent()` (used for the diacritics-free match, replacing OpenSearch's
+`asciifolding`) is STABLE, not IMMUTABLE, which Postgres won't allow inside
+a `GENERATED ALWAYS AS (...) STORED` column - worked around with a thin
+`immutable_unaccent()` SQL wrapper explicitly marked `IMMUTABLE`, the
+documented pattern for this exact limitation (see the `unaccent` contrib
+module's own docs).
 
 ## Tika server config schema
 

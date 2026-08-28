@@ -8,7 +8,6 @@ from types import FrameType
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from ftpoc.clients import (
-    make_opensearch_client,
     make_postgres_pool,
     make_redis_client,
     make_s3_client,
@@ -39,6 +38,10 @@ def _handle_shutdown(signum: int, frame: FrameType | None) -> None:
 
 def run(settings: Settings) -> None:
     redis_client = make_redis_client(settings)
+    # One pool shared by repository and indexer: both now talk to the same
+    # Postgres database (see ftpoc.indexing), so there is no separate
+    # OpenSearch client/resource to construct here anymore.
+    pool = make_postgres_pool(settings)
     pipeline = IngestPipeline(
         store=DocumentStore(
             make_s3_client(settings), make_s3_presign_client(settings), settings.s3_bucket
@@ -46,8 +49,8 @@ def run(settings: Settings) -> None:
         extractor=TikaExtractor(
             settings.tika_url, settings.tika_timeout_seconds, settings.tika_max_retries
         ),
-        repository=DocumentRepository(make_postgres_pool(settings)),
-        indexer=DocumentIndexer(make_opensearch_client(settings), settings.opensearch_index),
+        repository=DocumentRepository(pool),
+        indexer=DocumentIndexer(pool),
         text_prefix=settings.s3_text_prefix,
         min_chars_per_page=settings.min_chars_per_page,
     )

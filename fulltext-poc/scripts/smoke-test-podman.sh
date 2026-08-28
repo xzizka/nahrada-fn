@@ -21,8 +21,6 @@ set +a
 BIND_ADDR="${BIND_ADDR:-127.0.0.1}"
 INGEST_URL="http://${BIND_ADDR}:8081"
 SEARCH_URL="http://${BIND_ADDR}:8080"
-OS_URL="http://${BIND_ADDR}:9200"
-OS_AUTH="admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}"
 
 FAILURES=0
 
@@ -53,12 +51,8 @@ wait_for_status() {
     echo "${status:-timeout}"
 }
 
-os_refresh() {
-    curl -sf -u "$OS_AUTH" -X POST "${OS_URL}/documents/_refresh" >/dev/null
-}
-
-os_count() {
-    curl -sf -u "$OS_AUTH" "${OS_URL}/documents/_count" | jq '.count'
+indexed_count() {
+    pg_query "select count(*) from document where content is not null"
 }
 
 echo "== 1. bootstrap =="
@@ -73,14 +67,13 @@ echo "sha256=$sha256"
 echo "== 3. waiting for status=indexed (timeout 60s) =="
 status=$(wait_for_status "$sha256" 60)
 assert "Document reaches status=indexed" "$([ "$status" = "indexed" ] && echo true || echo false)" "final status=$status"
-os_refresh
 
 echo "== Assert A: lemmatization (query 'smlouvám', absent verbatim from the text) =="
 resp=$(curl -sf --get "${SEARCH_URL}/search" --data-urlencode "q=smlouvám")
 total=$(echo "$resp" | jq '.total')
 assert "Assert A - hunspell lemmatization" "$([ "$total" -ge 1 ] && echo true || echo false)" "total=$total"
 
-echo "== Assert B: diacritics-free query 'zaruka' via content.folded =="
+echo "== Assert B: diacritics-free query 'zaruka' via the unaccent-folded representation =="
 resp=$(curl -sf --get "${SEARCH_URL}/search" --data-urlencode "q=zaruka")
 total=$(echo "$resp" | jq '.total')
 assert "Assert B - asciifolded match" "$([ "$total" -ge 1 ] && echo true || echo false)" "total=$total"
@@ -94,12 +87,11 @@ assert "Assert C - highlight present" "$([ "$highlight_count" -ge 1 ] && echo tr
 download_url=$(echo "$resp" | jq -r '.hits[0].download_url')
 
 echo "== Assert D: idempotent re-upload =="
-count_before=$(os_count)
+count_before=$(indexed_count)
 worker_log_hits_before=$(podman logs worker 2>/dev/null | grep -c "Sidecar cache hit for ${sha256}" || true)
 curl -sf -X POST "${INGEST_URL}/documents" -F "file=@${PDF_PATH};type=application/pdf" >/dev/null
 sleep 10
-os_refresh
-count_after=$(os_count)
+count_after=$(indexed_count)
 worker_log_hits_after=$(podman logs worker 2>/dev/null | grep -c "Sidecar cache hit for ${sha256}" || true)
 assert "Assert D - document count unchanged" "$([ "$count_before" = "$count_after" ] && echo true || echo false)" "before=$count_before after=$count_after"
 assert "Assert D - Tika skipped on re-upload (sidecar cache hit logged)" \

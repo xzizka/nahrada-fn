@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
+from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
 
-from ftpoc.clients import make_opensearch_client, make_s3_client, make_s3_presign_client
+from ftpoc.clients import make_postgres_pool, make_s3_client, make_s3_presign_client
 from ftpoc.config import Settings
-from ftpoc.query import SearchQueryBuilder
+from ftpoc.query import HEADLINE_FRAGMENT_DELIMITER, SearchQueryBuilder
 from ftpoc.storage import DocumentStore
 
 logging.basicConfig(level=logging.INFO)
@@ -32,56 +34,52 @@ class SearchResponse(BaseModel):
 
 
 class SearchService:
-    """Executes a search and shapes the response. Never builds DSL itself -
+    """Executes a search and shapes the response. Never builds SQL itself -
     that's SearchQueryBuilder's job - and never talks to S3 for anything but
     presigned URLs, via the shared DocumentStore."""
 
     def __init__(
         self,
-        opensearch_client: Any,
+        pool: ConnectionPool,
         query_builder: SearchQueryBuilder,
         store: DocumentStore,
-        index_name: str,
         presigned_url_ttl_seconds: int,
     ) -> None:
-        self._client = opensearch_client
+        self._pool = pool
         self._query_builder = query_builder
         self._store = store
-        self._index_name = index_name
         self._ttl = presigned_url_ttl_seconds
 
     def search(self, query: str, from_: int, size: int) -> SearchResponse:
-        body = self._query_builder.build(query, from_, size)
-        result = self._client.search(index=self._index_name, body=body)
+        built = self._query_builder.build(query, from_, size)
 
-        hits = []
-        for hit in result["hits"]["hits"]:
-            source = hit["_source"]
-            highlights = hit.get("highlight", {}).get("content", [])
-            hits.append(
-                SearchHit(
-                    filename=source["filename"],
-                    score=hit["_score"] or 0.0,
-                    highlights=highlights,
-                    download_url=self._store.presigned_url(source["s3_key"], self._ttl),
-                )
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            started = time.monotonic()
+            cur.execute(built.sql, built.params)
+            rows = cur.fetchall()
+            took_ms = int((time.monotonic() - started) * 1000)
+
+        total = int(rows[0][4]) if rows else 0
+        hits = [
+            SearchHit(
+                filename=filename,
+                score=float(score) if score is not None else 0.0,
+                highlights=[h for h in headline.split(HEADLINE_FRAGMENT_DELIMITER) if h],
+                download_url=self._store.presigned_url(s3_key, self._ttl),
             )
+            for filename, s3_key, score, headline, _total in rows
+        ]
 
-        return SearchResponse(
-            total=result["hits"]["total"]["value"],
-            took_ms=result["took"],
-            hits=hits,
-        )
+        return SearchResponse(total=total, took_ms=took_ms, hits=hits)
 
 
 def create_app(settings: Settings) -> FastAPI:
     service = SearchService(
-        opensearch_client=make_opensearch_client(settings),
+        pool=make_postgres_pool(settings),
         query_builder=SearchQueryBuilder(),
         store=DocumentStore(
             make_s3_client(settings), make_s3_presign_client(settings), settings.s3_bucket
         ),
-        index_name=settings.opensearch_index,
         presigned_url_ttl_seconds=settings.presigned_url_ttl_seconds,
     )
 

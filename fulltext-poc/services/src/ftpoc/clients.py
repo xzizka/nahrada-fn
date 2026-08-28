@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 
 import boto3
 from botocore.client import Config as BotoConfig
-from opensearchpy import OpenSearch
 from psycopg_pool import ConnectionPool
 from redis import Redis
 
@@ -49,16 +48,6 @@ def make_s3_presign_client(settings: Settings) -> S3Client:
         aws_secret_access_key=settings.s3_secret_key,
         region_name=settings.s3_region,
         config=_BOTO_CONFIG,
-    )
-
-
-def make_opensearch_client(settings: Settings) -> OpenSearch:
-    return OpenSearch(
-        hosts=[settings.opensearch_url],
-        http_auth=(settings.opensearch_user, settings.opensearch_password),
-        use_ssl=settings.opensearch_url.startswith("https://"),
-        verify_certs=False,
-        ssl_show_warn=False,
     )
 
 

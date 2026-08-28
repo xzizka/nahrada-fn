@@ -1,7 +1,7 @@
 [Unit]
 Description=ftpoc worker
-After=rustfs.service postgres.service redis.service opensearch.service tika.service
-Requires=rustfs.service postgres.service redis.service opensearch.service tika.service
+After=rustfs.service postgres.service redis.service tika.service
+Requires=rustfs.service postgres.service redis.service tika.service
 
 [Container]
 ContainerName=worker

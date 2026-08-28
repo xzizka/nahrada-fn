@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
-import json
 import os
 import sys
 from dataclasses import dataclass
@@ -19,7 +18,6 @@ if TYPE_CHECKING:
     from mypy_boto3_s3.client import S3Client
 
 from ftpoc.clients import (
-    make_opensearch_client,
     make_postgres_pool,
     make_redis_client,
     make_s3_client,
@@ -59,21 +57,10 @@ def cmd_bootstrap(settings: Settings) -> int:
     store.ensure_bucket()
     print(f"Bucket '{settings.s3_bucket}' ready")
 
-    template_path = os.path.join(os.getcwd(), "opensearch", "index-template.json")
-    with open(template_path, encoding="utf-8") as f:
-        template = json.load(f)
-
-    indexer = DocumentIndexer(make_opensearch_client(settings), settings.opensearch_index)
-    indexer.put_index_template("documents", template)
-    print("Index template 'documents' installed")
-
-    opensearch_client = make_opensearch_client(settings)
-    if not opensearch_client.indices.exists(index=settings.opensearch_index):
-        opensearch_client.indices.create(index=settings.opensearch_index)
-        print(f"Index '{settings.opensearch_index}' created")
-    else:
-        print(f"Index '{settings.opensearch_index}' already exists")
-
+    # No index/template step anymore: the search index is the `document`
+    # table's generated `search_tsv` column, created by
+    # postgres/002-fts.sql when the postgres container first initializes
+    # its data volume - nothing left for bootstrap to install at runtime.
     return 0
 
 
@@ -93,13 +80,14 @@ def cmd_backfill(settings: Settings) -> int:
 
 
 def cmd_reindex(settings: Settings) -> int:
+    pool = make_postgres_pool(settings)
     pipeline = IngestPipeline(
         store=DocumentStore(
             make_s3_client(settings), make_s3_presign_client(settings), settings.s3_bucket
         ),
         extractor=TikaExtractor(settings.tika_url, settings.tika_timeout_seconds),
-        repository=DocumentRepository(make_postgres_pool(settings)),
-        indexer=DocumentIndexer(make_opensearch_client(settings), settings.opensearch_index),
+        repository=DocumentRepository(pool),
+        indexer=DocumentIndexer(pool),
         text_prefix=settings.s3_text_prefix,
         min_chars_per_page=settings.min_chars_per_page,
     )
@@ -329,7 +317,7 @@ def _object_exists(client: S3Client, bucket: str, key: str) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(prog="ftpoc")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("bootstrap", help="Create bucket + install OpenSearch index template")
+    subparsers.add_parser("bootstrap", help="Create the S3 bucket")
     subparsers.add_parser("backfill", help="Sweep bucket once, enqueue anything missing from PG")
     subparsers.add_parser("reindex", help="Rebuild the index from S3 sidecars, without calling Tika")
     subparsers.add_parser("s3-probe", help="Verify the S3 backend supports what the pipeline needs")

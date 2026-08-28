@@ -41,7 +41,7 @@ backfill:
 	podman-compose run --rm --no-deps ingest-api python -m ftpoc.cli backfill
 
 reset:
-	@echo "This deletes ALL volumes (rustfs-data, opensearch-data, postgres-data)."
+	@echo "This deletes ALL volumes (rustfs-data, postgres-data)."
 	@read -p "Type 'yes' to continue: " confirm && [ "$$confirm" = "yes" ] || (echo "Aborted"; exit 1)
 	podman-compose down -v
 

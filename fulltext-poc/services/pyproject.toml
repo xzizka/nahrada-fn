@@ -1,7 +1,7 @@
 [project]
 name = "ftpoc"
 version = "0.1.0"
-description = "Fulltext search ingest/query pipeline (RustFS + Tika + OpenSearch) PoC"
+description = "Fulltext search ingest/query pipeline (RustFS + Tika + PostgreSQL FTS) PoC"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -9,7 +9,6 @@ dependencies = [
     "python-multipart>=0.0.12",
     "boto3>=1.35",
     "httpx>=0.27",
-    "opensearch-py>=2.7",
     "psycopg[binary]>=3.2",
     "psycopg-pool>=3.2",
     "redis>=5.1",

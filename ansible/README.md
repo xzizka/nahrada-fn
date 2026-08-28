@@ -13,7 +13,7 @@ remain the quick way to run the stack on a dev box (`make up`, `make hello`,
 (`/etc/containers/systemd/ftpoc/*.container`) so the stack starts on boot,
 restarts on failure, and is inspectable with plain `systemctl`/`journalctl` -
 appropriate for a host that's meant to keep running unattended. The two paths
-use the same image and the same `fulltext-poc/postgres`, `opensearch`, `tika`
+use the same images and the same `fulltext-poc/postgres`, `tika`
 config files, but do not share a network or ports - don't run both on the
 same host at once (see Notes).
 
@@ -24,14 +24,14 @@ to enable, no docker-group-equivalent to manage.
 ## How the dependency ordering works
 
 `docker-compose.yml` uses `depends_on: condition: service_healthy` to make
-sure e.g. `worker` doesn't start until `opensearch` and `tika` are actually
+sure e.g. `worker` doesn't start until `postgres` and `tika` are actually
 healthy, not just started. Quadlet has no direct equivalent of that compose
 key, so each `.container` unit sets `Notify=healthy`: systemd considers the
 unit "started" only once the container's own `HealthCmd` first succeeds.
 Combined with plain `Requires=`/`After=` (in `ingest-api.container`,
 `worker.container`, `scanner.container`, `search-api.container`, pointing at
 their infra dependencies), this gives the same ordering guarantee - `systemctl
-enable --now` on all nine services in one transaction lets systemd's own
+enable --now` on all eight services in one transaction lets systemd's own
 dependency graph resolve correct startup order, exactly as compose's
 `depends_on` graph did.
 
@@ -91,11 +91,15 @@ ansible-galaxy collection install -r requirements.yml
 ansible-playbook playbook.yml --ask-vault-pass
 ```
 
-This builds the image (`podman build`), renders and starts all nine
-`.container` units, and runs `bootstrap` (S3 bucket + OpenSearch index
-template) as a one-off `podman run`. Safe to re-run - re-rendering identical
-quadlet files is a no-op, `systemctl` treats an already-running unit as
-already satisfied, and bootstrap itself is idempotent.
+This builds both images (`podman build` - the app image and the custom
+Postgres image that bundles the Czech hunspell dictionary, see the
+fulltext-poc README's "PostgreSQL full-text search" section), renders and
+starts all eight `.container` units, and runs `bootstrap` (creates the S3
+bucket - the search schema itself is created by `postgres/*.sql` the first
+time Postgres's data volume initializes) as a one-off `podman run`. Safe to
+re-run - re-rendering identical quadlet files is a no-op, `systemctl` treats
+an already-running unit as already satisfied, and bootstrap itself is
+idempotent.
 
 Smoke tests are opt-in (`ftpoc_run_smoke_tests=true`):
 ```
@@ -129,7 +133,7 @@ it's still opt-in, not run on every deploy. Needs `jq` on the target (the
 `hello-smlouva.pdf` and expects a "Sidecar cache hit" log line from `worker`
 proving Tika was skipped the second time. `hello-smlouva.pdf`'s content (and
 so its SHA-256) never changes, so on a *repeated* run against the same
-still-populated `postgres`/`opensearch` data, `ingest-api` already recognizes
+still-populated `postgres` data, `ingest-api` already recognizes
 the hash as fully indexed and doesn't re-enqueue a worker job at all - there's
 nothing left for the worker to log a cache hit about, and this half of Assert
 D fails even though nothing is actually wrong (confirmed by checking `podman
@@ -153,17 +157,6 @@ on any container-based (as opposed to full-VM) target:
   the host netns directly, no tap device needed). The *runtime* containers
   are unaffected - Podman's normal rootful bridge networking (netavark) never
   touches `/dev/net/tun`.
-- **`vm.max_map_count` may already be host-managed and read-only.** The
-  `podman` role reads the current value first and only tries to raise it if
-  it's actually below 262144 - inside an LXC guest this sysctl commonly
-  belongs to the host and a write attempt fails with "permission denied"
-  even as root, even when the host already set it high enough.
-- **`RLIMIT_MEMLOCK` may be capped low and non-negotiable.** An LXC guest can
-  cap this well below what `bootstrap.memory_lock: true` needs to lock a
-  multi-GB JVM heap (8MB in the environment this was built against - check
-  with `ulimit -l` inside the guest). `opensearch.container` leaves memory
-  locking off for this reason; raise the container's memlock ceiling at the
-  LXC/Proxmox host level first if you need it back.
 - **Tailscale may run in `--tun=userspace-networking` mode** (same
   `/dev/net/tun` absence) - `systemctl status tailscaled` shows this. There
   is then no real interface carrying the Tailscale IP, so Podman can't bind
@@ -195,26 +188,12 @@ on any container-based (as opposed to full-VM) target:
   the target too.
 - Secrets never appear as literal `Environment=` values in a `.container`
   file (and so never show up in `systemctl cat`, `ps aux`, or the systemd
-  journal for that unit): `rustfs`/`opensearch`/`postgres` get them via
+  journal for that unit): `rustfs`/`postgres` get them via
   `EnvironmentFile=.../ftpoc-secrets.env`, the four app containers via
-  `EnvironmentFile=.../ftpoc-app.env`, both root-only-readable (`0600`). The
-  opensearch healthcheck references `$OPENSEARCH_INITIAL_ADMIN_PASSWORD` from
-  that file rather than embedding the password a second time.
-- `opensearch-dashboards.container` mirrors `docker-compose.yml`'s
-  `profiles: ["dashboards"]`: the unit is always rendered, but only
-  enabled/started when `ftpoc_enable_dashboards: true` (default `false`,
-  same opt-in-by-default behavior as compose). Publishes port 5601 on
-  `ftpoc_bind_addr` when enabled. Unlike compose (which defines no
-  healthcheck for it), this unit has one anyway (`GET /api/status`,
-  `HealthStartPeriod=60s` - Dashboards' plugin startup genuinely takes that
-  long) so `Notify=healthy` gives a real readiness signal instead of
-  systemd considering it "started" the instant the container process
-  launches. When both `ftpoc_enable_dashboards` and `ftpoc_run_smoke_tests`
-  are true, a smoke test task confirms `/api/status` is actually reachable.
+  `EnvironmentFile=.../ftpoc-app.env`, both root-only-readable (`0600`).
 - `make reset` (deletes all data volumes) has no equivalent wired into this
   playbook by design - it's destructive and interactive. To tear down the
   quadlet deployment by hand on the target: `systemctl disable --now` the
-  nine `.container` units, then `rm -rf /etc/containers/systemd/ftpoc` and
+  eight `.container` units, then `rm -rf /etc/containers/systemd/ftpoc` and
   `systemctl daemon-reload`; separately remove the `rustfs-data`/
-  `opensearch-data`/`postgres-data` podman volumes if you want the data gone
-  too.
+  `postgres-data` podman volumes if you want the data gone too.

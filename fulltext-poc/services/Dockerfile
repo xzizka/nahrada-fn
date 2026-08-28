@@ -18,7 +18,6 @@ COPY services/src ./src
 RUN pip install --no-cache-dir .
 
 COPY scripts ./scripts
-COPY opensearch/index-template.json ./opensearch/index-template.json
 
 RUN chown -R ftpoc:ftpoc /app
 USER ftpoc

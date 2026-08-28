@@ -18,15 +18,9 @@ ftpoc_scanner_interval_seconds: 60
 # after bootstrap - see ansible/README.md.
 ftpoc_run_smoke_tests: false
 
-# Mirrors docker-compose.yml's `profiles: ["dashboards"]` - off by default,
-# same as compose only starting it when asked. The unit is rendered either
-# way; this only controls whether it's enabled/started.
-ftpoc_enable_dashboards: false
-
 # --- secrets (defined in group_vars/all/vault.yml) ---
 ftpoc_rustfs_access_key: "{{ vault_rustfs_access_key }}"
 ftpoc_rustfs_secret_key: "{{ vault_rustfs_secret_key }}"
-ftpoc_opensearch_admin_password: "{{ vault_opensearch_admin_password }}"
 ftpoc_postgres_user: "{{ vault_postgres_user }}"
 ftpoc_postgres_password: "{{ vault_postgres_password }}"
 ftpoc_postgres_db: "{{ vault_postgres_db }}"

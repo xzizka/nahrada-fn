@@ -1,7 +1,7 @@
 [Unit]
 Description=ftpoc search-api
-After=rustfs.service opensearch.service
-Requires=rustfs.service opensearch.service
+After=rustfs.service postgres.service
+Requires=rustfs.service postgres.service
 
 [Container]
 ContainerName=search-api

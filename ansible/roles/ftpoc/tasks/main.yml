@@ -40,7 +40,7 @@
       - "--exclude=.ruff_cache"
       - "--exclude=*.egg-info"
 
-- name: Render the infra secrets env file (rustfs/opensearch/postgres)
+- name: Render the infra secrets env file (rustfs/postgres)
   ansible.builtin.template:
     src: ftpoc-secrets.env.j2
     dest: "{{ ftpoc_deploy_dir }}/ftpoc-secrets.env"
@@ -65,6 +65,17 @@
     chdir: "{{ ftpoc_deploy_dir }}"
   changed_when: true
 
+# Bundles the Czech hunspell dictionary into tsearch_data - see
+# postgres/Dockerfile and postgres/002-fts.sql. No apt/dnf packages fetched
+# during this build (just a COPY), so --network=host isn't load-bearing
+# here the way it is for the app image, but it's harmless to keep consistent.
+- name: Build the postgres image
+  ansible.builtin.command: >-
+    podman build --network=host -t ftpoc-postgres:local -f postgres/Dockerfile postgres
+  args:
+    chdir: "{{ ftpoc_deploy_dir }}"
+  changed_when: true
+
 - name: Create the quadlet directory
   ansible.builtin.file:
     path: /etc/containers/systemd/ftpoc
@@ -79,10 +90,8 @@
   loop:
     - ftpoc.network
     - rustfs-data.volume
-    - opensearch-data.volume
     - postgres-data.volume
     - rustfs.container
-    - opensearch.container
     - tika.container
     - redis.container
     - postgres.container
@@ -90,7 +99,6 @@
     - worker.container
     - scanner.container
     - search-api.container
-    - opensearch-dashboards.container
   register: ftpoc_quadlet_files
 
 - name: Reload systemd so quadlet regenerates units from the files above
@@ -110,7 +118,6 @@
     enabled: true
   loop:
     - rustfs.service
-    - opensearch.service
     - tika.service
     - redis.service
     - postgres.service
@@ -119,17 +126,7 @@
     - scanner.service
     - search-api.service
 
-# Mirrors docker-compose.yml's `profiles: ["dashboards"]` - the unit is
-# always rendered above (so it's there to start by hand), but not enabled by
-# default; opt in with ftpoc_enable_dashboards=true.
-- name: Enable and start opensearch-dashboards
-  ansible.builtin.systemd:
-    name: opensearch-dashboards.service
-    state: started
-    enabled: true
-  when: ftpoc_enable_dashboards | bool
-
-- name: Bootstrap the S3 bucket and OpenSearch index template
+- name: Bootstrap the S3 bucket
   ansible.builtin.command: >-
     podman run --rm --network ftpoc
     --env-file {{ ftpoc_deploy_dir }}/ftpoc-app.env
@@ -204,12 +201,3 @@
   ansible.builtin.debug:
     var: ftpoc_hello_result.stdout_lines
   when: ftpoc_run_smoke_tests | bool
-
-# Only meaningful when dashboards is actually enabled - by the time this
-# runs, the "Enable and start opensearch-dashboards" task above already
-# blocked on Notify=healthy, so this is a confirmation, not a wait loop.
-- name: "Smoke test: opensearch-dashboards reachability"
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:5601/api/status"
-    status_code: 200
-  when: (ftpoc_run_smoke_tests | bool) and (ftpoc_enable_dashboards | bool)

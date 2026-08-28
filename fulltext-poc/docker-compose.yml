@@ -10,9 +10,6 @@ x-ftpoc-env: &ftpoc-env
   FTPOC_S3_ACCESS_KEY: "${RUSTFS_ACCESS_KEY}"
   FTPOC_S3_SECRET_KEY: "${RUSTFS_SECRET_KEY}"
   FTPOC_S3_BUCKET: "documents"
-  FTPOC_OPENSEARCH_URL: "http://opensearch:9200"
-  FTPOC_OPENSEARCH_USER: "admin"
-  FTPOC_OPENSEARCH_PASSWORD: "${OPENSEARCH_INITIAL_ADMIN_PASSWORD}"
   FTPOC_POSTGRES_DSN: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
   FTPOC_REDIS_URL: "redis://redis:6379/0"
   FTPOC_TIKA_URL: "http://tika:9998"
@@ -42,50 +39,6 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
-
-  opensearch:
-    image: opensearchproject/opensearch:3.8.0
-    restart: unless-stopped
-    environment:
-      discovery.type: single-node
-      bootstrap.memory_lock: "true"
-      OPENSEARCH_JAVA_OPTS: "-Xms2g -Xmx2g"
-      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "${OPENSEARCH_INITIAL_ADMIN_PASSWORD}"
-      # Security plugin stays ON (basic auth intact); only the HTTP-layer TLS
-      # termination is disabled, so we get auth without self-signed certs in
-      # a lab. See README for the production tradeoff.
-      plugins.security.ssl.http.enabled: "false"
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    volumes:
-      - opensearch-data:/usr/share/opensearch/data
-      - ./opensearch/hunspell:/usr/share/opensearch/config/hunspell:ro
-    ports:
-      - "${BIND_ADDR}:9200:9200"
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "curl -s -u admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD} http://localhost:9200/_cluster/health | grep -Eq '\"status\":\"(green|yellow)\"'",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 30s
-
-  opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:3.8.0
-    restart: unless-stopped
-    profiles: ["dashboards"]
-    environment:
-      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
-    ports:
-      - "${BIND_ADDR}:5601:5601"
-    depends_on:
-      opensearch:
-        condition: service_healthy
 
   tika:
     image: apache/tika:3.3.1.0-full
@@ -117,7 +70,14 @@ services:
       retries: 10
 
   postgres:
-    image: postgres:18.6-bookworm
+    # Custom image, not the stock one: bundles the Czech hunspell
+    # dictionary files into tsearch_data so 002-fts.sql's
+    # `CREATE TEXT SEARCH DICTIONARY ... TEMPLATE=ispell` can find them (see
+    # postgres/Dockerfile). Postgres is also the search index now - see
+    # docs/opensearch-alternativy.md for why OpenSearch was replaced.
+    build:
+      context: ./postgres
+    image: ftpoc-postgres:local
     restart: unless-stopped
     environment:
       POSTGRES_USER: "${POSTGRES_USER}"
@@ -130,6 +90,7 @@ services:
       # convention even against an empty volume.
       - postgres-data:/var/lib/postgresql
       - ./postgres/001-schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ./postgres/002-fts.sql:/docker-entrypoint-initdb.d/002-fts.sql:ro
     ports:
       - "${BIND_ADDR}:5432:5432"
     healthcheck:
@@ -173,8 +134,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      opensearch:
-        condition: service_healthy
       tika:
         condition: service_healthy
     healthcheck:
@@ -215,7 +174,7 @@ services:
     depends_on:
       rustfs:
         condition: service_healthy
-      opensearch:
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/healthz', timeout=3)"]
@@ -226,5 +185,4 @@ services:
 
 volumes:
   rustfs-data:
-  opensearch-data:
   postgres-data:

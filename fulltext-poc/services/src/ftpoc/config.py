@@ -24,13 +24,7 @@ class Settings(BaseSettings):
     s3_raw_prefix: str = "documents/"
     s3_text_prefix: str = "text/"
 
-    # OpenSearch
-    opensearch_url: str
-    opensearch_user: str
-    opensearch_password: str
-    opensearch_index: str = "documents"
-
-    # PostgreSQL
+    # PostgreSQL (also the search index - see ftpoc.indexing/ftpoc.query)
     postgres_dsn: str
 
     # Redis
