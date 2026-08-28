@@ -127,3 +127,40 @@ následně - `fulltext-poc/postgres/003-trgm.sql`, ověřeno živě na `fn-pg`
 (překlep `smluova`→`smlouva`, `zaruca`→`zaruka`). Stejná typo tolerance
 (`fuzziness: AUTO`) doplněna i do OpenSearch buildu na `main`/`fn-replacement`,
 aby zůstala funkční parita mezi oběma větvemi.
+
+## Zbývající funkční rozdíl OpenSearch vs. PG FTS (2026-08-28)
+
+Po doplnění fuzzy tolerance na obě strany ověřeno živě na obou nasazeních
+(`fn-replacement` pro OpenSearch, `fn-pg` pro PG FTS), co OpenSearch nabízí
+navíc a je relevantní pro tenhle projekt (smluvní archiv, ne obecné
+srovnání všech pluginů):
+
+1. **Vektorové/sémantické hledání - rozdíl v připravenosti, ne ve
+   funkčnosti.** `fn-replacement`'s OpenSearch 3.8.0 má pluginy
+   `opensearch-knn`, `opensearch-ml`, `opensearch-neural-search` už
+   nainstalované (součást distribuce - `curl .../_cat/plugins` na
+   `fn-replacement` to potvrzuje). `fn-pg`'s Postgres nemá `pgvector`
+   ani dostupný (`SELECT * FROM pg_available_extensions WHERE
+   name='vector'` vrací nic) - musel by se přidat do
+   `fulltext-poc/postgres/Dockerfile` od nuly. V obou případech ale
+   chybí totéž: zvolit/nasadit konkrétní embedding model a zapojit ho do
+   ingest pipeline a dotazu - žádná strana to dnes skutečně nedělá.
+2. **`more_like_this` dotaz** ("najdi podobné dokumenty jako tenhle") -
+   nativní OpenSearch query typ, ověřený jako funkční (validní odpověď,
+   na 7dokumentovém testovacím korpusu bez shody kvůli velikosti
+   korpusu, ne chybě). PG FTS nemá jednořádkový ekvivalent - dalo by se
+   přiblížit přes `similarity()`/trigram, ale není to vestavěný typ
+   dotazu.
+3. **Bohatší nástroje pro ladění relevance** (`function_score`,
+   `rescore`, skládání dotazů, `minimum_should_match`) - `ts_rank_cd` +
+   4 diskrétní váhové třídy (A/B/C/D) v `ftpoc_document_tsvector()` jsou
+   hrubší nástroj. Relevantní hlavně při rostoucím korpusu.
+
+Záměrně nepočítáno jako rozdíl: fasetované agregace (ověřeno živě na
+OpenSearch - `terms` agregace na `content_type` funguje - ale
+`search-api` to nevystavuje v žádné verzi, a Postgres by to zvládl stejně
+snadno přes `GROUP BY`), ACL/document-level security (OpenSearch má
+security-plugin DLS/FLS, Postgres má nativně Row-Level Security od verze
+9.5 - srovnatelné nástroje, žádný z nich dnes není zapojený), horizontální
+škálování shardingem (reálný rozdíl do budoucna, ale netýká se současné
+velikosti korpusu).
