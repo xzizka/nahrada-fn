@@ -6,6 +6,16 @@ from datetime import datetime
 from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 
+# Explicit column list, not `SELECT *`: the `document` table also carries
+# `content`/`search_tsv` (see postgres/002-fts.sql, ftpoc.indexing) which
+# aren't part of DocumentRecord - `SELECT *` with class_row(DocumentRecord)
+# would fail on the extra columns.
+_RECORD_COLUMNS = """
+    sha256, s3_bucket, s3_key, text_s3_key, filename, content_type,
+    size_bytes, etag, tika_version, extracted_at, indexed_at, seen_at,
+    status, error
+"""
+
 
 @dataclass(frozen=True)
 class DocumentRecord:
@@ -88,7 +98,7 @@ class DocumentRepository:
         with self._pool.connection() as conn:
             with conn.cursor(row_factory=class_row(DocumentRecord)) as cur:
                 cur.execute(
-                    "SELECT * FROM document WHERE s3_bucket = %s AND s3_key = %s",
+                    f"SELECT {_RECORD_COLUMNS} FROM document WHERE s3_bucket = %s AND s3_key = %s",
                     (s3_bucket, s3_key),
                 )
                 return cur.fetchone()
@@ -96,7 +106,7 @@ class DocumentRepository:
     def get_by_sha256(self, sha256: str) -> DocumentRecord | None:
         with self._pool.connection() as conn:
             with conn.cursor(row_factory=class_row(DocumentRecord)) as cur:
-                cur.execute("SELECT * FROM document WHERE sha256 = %s", (sha256,))
+                cur.execute(f"SELECT {_RECORD_COLUMNS} FROM document WHERE sha256 = %s", (sha256,))
                 return cur.fetchone()
 
     def mark_status(self, sha256: str, status: str, error: str | None = None) -> None:
@@ -129,7 +139,10 @@ class DocumentRepository:
     def list_by_status(self, status: str) -> list[DocumentRecord]:
         with self._pool.connection() as conn:
             with conn.cursor(row_factory=class_row(DocumentRecord)) as cur:
-                cur.execute("SELECT * FROM document WHERE status = %s ORDER BY seen_at", (status,))
+                cur.execute(
+                    f"SELECT {_RECORD_COLUMNS} FROM document WHERE status = %s ORDER BY seen_at",
+                    (status,),
+                )
                 return cur.fetchall()
 
     def list_indexed(self) -> list[DocumentRecord]:
@@ -139,7 +152,7 @@ class DocumentRepository:
         be reindexed as if it were searchable content."""
         with self._pool.connection() as conn:
             with conn.cursor(row_factory=class_row(DocumentRecord)) as cur:
-                cur.execute("SELECT * FROM document WHERE status = 'indexed' ORDER BY seen_at")
+                cur.execute(f"SELECT {_RECORD_COLUMNS} FROM document WHERE status = 'indexed' ORDER BY seen_at")
                 return cur.fetchall()
 
     def count_by_status(self, status: str) -> int:
