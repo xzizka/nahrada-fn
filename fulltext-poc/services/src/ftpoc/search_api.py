@@ -31,6 +31,10 @@ class SearchResponse(BaseModel):
     total: int
     took_ms: int
     hits: list[SearchHit]
+    # Set only when the literal query matched nothing and a per-word
+    # trigram-similarity correction (see SearchService._fuzzy_correct) found
+    # something that did - absent otherwise, never present with total == 0.
+    corrected_query: str | None = None
 
 
 class SearchService:
@@ -51,6 +55,31 @@ class SearchService:
         self._ttl = presigned_url_ttl_seconds
 
     def search(self, query: str, from_: int, size: int) -> SearchResponse:
+        total, hits, took_ms = self._run_query(query, from_, size)
+        if total > 0:
+            return SearchResponse(total=total, took_ms=took_ms, hits=hits)
+
+        # Fuzzy fallback: the strict/lemma/folded tsquery match found
+        # nothing, so this is likely a typo rather than a genuine
+        # zero-result query - try substituting each word for the closest
+        # corpus word (pg_trgm) and only use that if it actually finds
+        # something, never as a silent replacement for a real miss.
+        corrected = self._fuzzy_correct(query)
+        if corrected is None:
+            return SearchResponse(total=total, took_ms=took_ms, hits=hits)
+
+        fuzzy_total, fuzzy_hits, fuzzy_took_ms = self._run_query(corrected, from_, size)
+        if fuzzy_total == 0:
+            return SearchResponse(total=total, took_ms=took_ms, hits=hits)
+
+        return SearchResponse(
+            total=fuzzy_total,
+            took_ms=took_ms + fuzzy_took_ms,
+            hits=fuzzy_hits,
+            corrected_query=corrected,
+        )
+
+    def _run_query(self, query: str, from_: int, size: int) -> tuple[int, list[SearchHit], int]:
         built = self._query_builder.build(query, from_, size)
 
         with self._pool.connection() as conn, conn.cursor() as cur:
@@ -69,8 +98,31 @@ class SearchService:
             )
             for filename, s3_key, score, headline, _total in rows
         ]
+        return total, hits, took_ms
 
-        return SearchResponse(total=total, took_ms=took_ms, hits=hits)
+    def _fuzzy_correct(self, query: str) -> str | None:
+        """Replaces each word with the closest corpus word (by trigram
+        similarity) that isn't itself, if one exists. Returns None if no
+        word had a correction - callers must not re-run an unchanged
+        query."""
+        words = query.split()
+        corrected_words = []
+        changed = False
+        for word in words:
+            suggestion = self._suggest_word(word)
+            if suggestion is not None and suggestion.lower() != word.lower():
+                corrected_words.append(suggestion)
+                changed = True
+            else:
+                corrected_words.append(word)
+        return " ".join(corrected_words) if changed else None
+
+    def _suggest_word(self, word: str) -> str | None:
+        built = self._query_builder.build_suggestion(word)
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(built.sql, built.params)
+            row = cur.fetchone()
+        return str(row[0]) if row is not None else None
 
 
 def create_app(settings: Settings) -> FastAPI:
