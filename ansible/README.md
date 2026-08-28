@@ -97,9 +97,14 @@ fulltext-poc README's "PostgreSQL full-text search" section), renders and
 starts all eight `.container` units, and runs `bootstrap` (creates the S3
 bucket - the search schema itself is created by `postgres/*.sql` the first
 time Postgres's data volume initializes) as a one-off `podman run`. Safe to
-re-run - re-rendering identical quadlet files is a no-op, `systemctl` treats
-an already-running unit as already satisfied, and bootstrap itself is
-idempotent.
+re-run - re-rendering identical quadlet files is a no-op and bootstrap
+itself is idempotent. `postgres`/`ingest-api`/`worker`/`scanner`/`search-api`
+are explicitly `state: restarted` on every run rather than just `started`,
+since their images get rebuilt every run under the same tag and Podman
+containers pin to the image ID at creation time, not the tag - `started`
+alone would silently keep the pre-rebuild container running. `rustfs`/
+`tika`/`redis` (stock images, never rebuilt) stay `started` and are
+untouched if already up.
 
 Smoke tests are opt-in (`ftpoc_run_smoke_tests=true`):
 ```
