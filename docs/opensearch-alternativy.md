@@ -121,3 +121,9 @@ téhle větvi kompletně nahrazen - viz `fulltext-poc/postgres/002-fts.sql`
 (schéma), `fulltext-poc/VERSIONS.md` (souhrn rozhodnutí a co bylo ověřeno)
 a `fulltext-poc/README.md` (aktuální popis). Větev `main` zůstává na
 původním OpenSearch buildu.
+
+`pg_trgm` (fuzzy/typo tolerance, zmíněné výše jako doporučení) doplněno
+následně - `fulltext-poc/postgres/003-trgm.sql`, ověřeno živě na `fn-pg`
+(překlep `smluova`→`smlouva`, `zaruca`→`zaruka`). Stejná typo tolerance
+(`fuzziness: AUTO`) doplněna i do OpenSearch buildu na `main`/`fn-replacement`,
+aby zůstala funkční parita mezi oběma větvemi.

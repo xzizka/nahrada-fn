@@ -193,10 +193,23 @@ JVM heap around it.
 
 Diacritics-free matching uses the `unaccent` extension (replacing
 OpenSearch's `asciifolding`) via a small `immutable_unaccent()` wrapper -
-see `postgres/002-fts.sql` for why the wrapper is needed. Fuzzy/typo
-tolerance (`pg_trgm`) was a runner-up idea in the decision doc but isn't
-wired in - a candidate future improvement, not a gap this build claims to
-close.
+see `postgres/002-fts.sql` for why the wrapper is needed.
+
+## Fuzzy/typo tolerance (`pg_trgm`)
+
+`postgres/003-trgm.sql` adds two things on top of the tsquery-based match
+above, which handles inflection and diacritics but not misspellings:
+
+- **Fuzzy filename matching**, folded into every search - a document whose
+  filename is a close (not exact) match for the query text is included
+  even with zero content match, scored via `GREATEST(ts_rank_cd(...),
+  similarity(filename, query))`.
+- **Query-term spell correction**, as a zero-results fallback only (never
+  silently replaces a query that already found something): each word gets
+  checked against the corpus vocabulary - `ts_stat()` over `search_tsv`,
+  no separate word list to maintain - for a close trigram match, and the
+  search retries with any corrections found. Surfaced in the `/search`
+  response as `corrected_query` (`null` unless it actually fired).
 
 ## What this PoC deliberately does not solve
 
